@@ -1,0 +1,957 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { mockIPC } from "@tauri-apps/api/mocks";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { PRIVATE_KEY_NOT_A_BACKUP } from "../lib/ipc";
+import type { BackupPreview, WalletMeta } from "../lib/ipc";
+import { useUi } from "../state/store";
+import { BackupExportModal, BackupRestoreModal } from "./BackupModals";
+
+// The file dialogs open on the Rust side: a test answers the command
+// with what was picked, or with null for a dialog closed on nothing.
+const PICKED = { name: "backup.gerfaut", data: "R0ZCQUNLVVA=" };
+
+// What the camera "sees", one entry per animation tick, for the tests
+// that drive a real scan all the way to the restore screen.
+const cameraFrames: string[] = [];
+let cameraCursor = 0;
+
+vi.mock("jsqr", () => ({
+  default: () => {
+    const data = cameraFrames[cameraCursor] ?? null;
+    cameraCursor += 1;
+    return data === null ? null : { data };
+  },
+}));
+
+/** A camera that answers, and a hand on requestAnimationFrame so the
+    decode loop runs one step per call, past its 120 ms throttle. */
+function fakeCamera() {
+  const track = { stop: vi.fn() };
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [track] }) },
+  });
+  Object.defineProperty(HTMLMediaElement.prototype, "play", {
+    configurable: true,
+    value: vi.fn().mockResolvedValue(undefined),
+  });
+  Object.defineProperty(HTMLMediaElement.prototype, "readyState", {
+    configurable: true,
+    get: () => 4,
+  });
+  Object.defineProperty(HTMLVideoElement.prototype, "videoWidth", {
+    configurable: true,
+    get: () => 320,
+  });
+  Object.defineProperty(HTMLVideoElement.prototype, "videoHeight", {
+    configurable: true,
+    get: () => 240,
+  });
+  HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue({
+    drawImage: vi.fn(),
+    getImageData: vi
+      .fn()
+      .mockReturnValue({ data: new Uint8ClampedArray(4), width: 1, height: 1 }),
+  }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+  const queue: FrameRequestCallback[] = [];
+  let now = 0;
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    queue.push(callback);
+    return queue.length;
+  });
+  vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  const tick = async () => {
+    if (queue.length === 0) {
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
+    const callback = queue.shift();
+    now += 200;
+    await act(async () => {
+      callback?.(now);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  };
+  return { tick, track };
+}
+
+const WALLETS: WalletMeta[] = [
+  {
+    id: "w1",
+    name: "Cold storage",
+    icon: "wallet",
+    network: "signet",
+    kind: { type: "descriptors", external: "wpkh(...)", internal: null, script: "segwit" },
+    recognized_as: "descriptor",
+    created_at: 1_755_000_000,
+    gap_limit: 20,
+    scan_gap: 20,
+    labels: {},
+    last_sync: null,
+    cached: {
+      balance: {
+        confirmed: 0,
+        trusted_pending: 0,
+        untrusted_pending: 0,
+        pending_net_sats: null,
+        immature: 0,
+        total: 0,
+      },
+      tx_count: 0,
+    },
+  },
+  {
+    id: "w2",
+    name: "Mainnet cold",
+    icon: "wallet",
+    network: "mainnet",
+    kind: { type: "single_address", address: "bc1qexample" },
+    recognized_as: "address",
+    created_at: 1_755_000_000,
+    gap_limit: 20,
+    scan_gap: 20,
+    labels: {},
+    last_sync: null,
+    cached: {
+      balance: {
+        confirmed: 0,
+        trusted_pending: 0,
+        untrusted_pending: 0,
+        pending_net_sats: null,
+        immature: 0,
+        total: 0,
+      },
+      tx_count: 0,
+    },
+  },
+];
+
+const PREVIEW: BackupPreview = {
+  created_at: 1_755_000_000,
+  has_settings: true,
+  wallets: [
+    {
+      index: 0,
+      name: "Cold storage",
+      network: "signet",
+      kind: { type: "descriptors", external: "wpkh(...)", internal: null, script: "segwit" },
+      already_watched: false,
+      refused: null,
+    },
+    {
+      index: 1,
+      name: "Savings",
+      network: "signet",
+      kind: { type: "single_address", address: "tb1qexample" },
+      already_watched: true,
+      refused: null,
+    },
+  ],
+  backends: [{ network: "signet", backend: "mempool.space" }],
+  electrum_hosts: ["electrum.example.org:51002"],
+};
+
+function renderModal(node: React.ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={client}>{node}</QueryClientProvider>);
+}
+
+afterEach(() => {
+  // Restored here and not at the end of the test that installs them:
+  // a failure there would otherwise leave every later test hanging on
+  // a clock that never advances.
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.clearAllMocks();
+  cameraFrames.length = 0;
+  cameraCursor = 0;
+  // The store outlives a test, and a toast lives three seconds.
+  useUi.setState({ toast: null });
+});
+
+describe("exporting a backup", () => {
+  it("a password too short never reaches the core", async () => {
+    const calls: string[] = [];
+    mockIPC((cmd) => {
+      calls.push(cmd);
+      throw new Error(`unexpected command ${cmd}`);
+    });
+    renderModal(
+      <BackupExportModal
+        open
+        onClose={() => {}}
+        wallets={WALLETS}
+        activeNetwork="signet"
+      />,
+    );
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("Password"), "short");
+    await user.type(screen.getByLabelText("Confirm password"), "short");
+    await user.click(screen.getByRole("button", { name: /create backup/i }));
+
+    expect(await screen.findByText("Use at least 8 characters.")).toBeInTheDocument();
+    expect(calls).not.toContain("export_backup");
+  });
+
+  it("two different passwords are refused", async () => {
+    mockIPC(() => undefined);
+    renderModal(
+      <BackupExportModal
+        open
+        onClose={() => {}}
+        wallets={WALLETS}
+        activeNetwork="signet"
+      />,
+    );
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("Password"), "correct horse");
+    await user.type(screen.getByLabelText("Confirm password"), "correct hors");
+    await user.click(screen.getByRole("button", { name: /create backup/i }));
+
+    expect(await screen.findByText("The two passwords differ.")).toBeInTheDocument();
+  });
+
+  it("takes every wallet by default and the settings when asked", async () => {
+    let sent: unknown = null;
+    mockIPC((cmd, args) => {
+      if (cmd === "export_backup") {
+        sent = args;
+        return { data: "R0ZCQUNLVVA=", frames: ["ur:bytes/aaa"], wallet_count: 2, size_bytes: 512 };
+      }
+      throw new Error(`unexpected command ${cmd}`);
+    });
+    renderModal(
+      <BackupExportModal
+        open
+        onClose={() => {}}
+        wallets={WALLETS}
+        activeNetwork="signet"
+      />,
+    );
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("switch", { name: /include node settings/i }));
+    await user.type(screen.getByLabelText("Password"), "correct horse");
+    await user.type(screen.getByLabelText("Confirm password"), "correct horse");
+    await user.click(screen.getByRole("button", { name: /create backup/i }));
+
+    await screen.findByText(/2 wallets ·/);
+    const options = (sent as { options: { wallet_ids: null; include_settings: boolean } })
+      .options;
+    // Null means every wallet on every network, not a filtered list.
+    expect(options.wallet_ids).toBeNull();
+    expect(options.include_settings).toBe(true);
+    expect(screen.getByRole("button", { name: /save file/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /show qr code/i })).toBeInTheDocument();
+  });
+
+  it("says what the password is really up against, where it is chosen", async () => {
+    // The file travels. Whoever ends up with it runs guesses on their
+    // own machine, forever: nothing slows that down but the passphrase.
+    mockIPC(() => undefined);
+    renderModal(
+      <BackupExportModal
+        open
+        onClose={() => {}}
+        wallets={WALLETS}
+        activeNetwork="signet"
+      />,
+    );
+
+    const hint = screen.getByText(
+      /This file can be copied and guessed offline: use a long passphrase, several words\./,
+    );
+    expect(hint).toBeInTheDocument();
+    // And it reaches the caret, not only the eye.
+    expect(screen.getByLabelText("Password")).toHaveAttribute(
+      "aria-describedby",
+      hint.id,
+    );
+  });
+
+  it("the network scope sends only that network's ids", async () => {
+    let sent: unknown = null;
+    mockIPC((cmd, args) => {
+      if (cmd === "export_backup") {
+        sent = args;
+        return { data: "R0ZCQUNLVVA=", frames: ["ur:bytes/aaa"], wallet_count: 1, size_bytes: 400 };
+      }
+      throw new Error(`unexpected command ${cmd}`);
+    });
+    renderModal(
+      <BackupExportModal
+        open
+        onClose={() => {}}
+        wallets={WALLETS}
+        activeNetwork="signet"
+      />,
+    );
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("radio", { name: /signet only/i }));
+    await user.type(screen.getByLabelText("Password"), "correct horse");
+    await user.type(screen.getByLabelText("Confirm password"), "correct horse");
+    await user.click(screen.getByRole("button", { name: /create backup/i }));
+
+    await screen.findByText(/1 wallet ·/);
+    expect((sent as { options: { wallet_ids: string[] } }).options.wallet_ids).toEqual(["w1"]);
+  });
+
+  /** Every wallet on the network shown: nothing to choose, so no group
+      of one option that would read as a second primary button. */
+  it("says the scope plainly when there is no choice to make", () => {
+    renderModal(
+      <BackupExportModal
+        open
+        onClose={() => {}}
+        wallets={[WALLETS[0]]}
+        activeNetwork="signet"
+      />,
+    );
+    expect(screen.queryByRole("radiogroup", { name: "Wallets" })).not.toBeInTheDocument();
+    expect(screen.getByText("All wallets")).toHaveTextContent("All wallets (1)");
+  });
+
+  it("saving the file hands Rust the bytes and a name, and says when it is written", async () => {
+    let saved: unknown = null;
+    mockIPC((cmd, args) => {
+      switch (cmd) {
+        case "export_backup":
+          return { data: "R0ZCQUNLVVA=", frames: ["ur:bytes/aaa"], wallet_count: 2, size_bytes: 512 };
+        case "save_backup_file":
+          saved = args;
+          return true;
+        default:
+          throw new Error(`unexpected command ${cmd}`);
+      }
+    });
+    renderModal(
+      <BackupExportModal
+        open
+        onClose={() => {}}
+        wallets={WALLETS}
+        activeNetwork="signet"
+      />,
+    );
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("Password"), "correct horse");
+    await user.type(screen.getByLabelText("Confirm password"), "correct horse");
+    await user.click(screen.getByRole("button", { name: /create backup/i }));
+    await user.click(await screen.findByRole("button", { name: /save file/i }));
+
+    // The dialog is Rust's: the screen sends the sealed bytes and the
+    // name it would give the file, never a path.
+    await waitFor(() => expect(saved).not.toBeNull());
+    const args = saved as { data: string; suggestedName: string };
+    expect(args.data).toBe("R0ZCQUNLVVA=");
+    expect(args.suggestedName).toMatch(/^gerfaut-backup-\d{4}-\d{2}-\d{2}\.gerfaut$/);
+    expect(Object.keys(args)).not.toContain("path");
+    await waitFor(() => expect(useUi.getState().toast).toBe("Backup saved"));
+  });
+
+  it("a save dialog closed on nothing leaves the screen where it was", async () => {
+    mockIPC((cmd) => {
+      switch (cmd) {
+        case "export_backup":
+          return { data: "R0ZCQUNLVVA=", frames: ["ur:bytes/aaa"], wallet_count: 2, size_bytes: 512 };
+        case "save_backup_file":
+          return false;
+        default:
+          throw new Error(`unexpected command ${cmd}`);
+      }
+    });
+    renderModal(
+      <BackupExportModal
+        open
+        onClose={() => {}}
+        wallets={WALLETS}
+        activeNetwork="signet"
+      />,
+    );
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("Password"), "correct horse");
+    await user.type(screen.getByLabelText("Confirm password"), "correct horse");
+    await user.click(screen.getByRole("button", { name: /create backup/i }));
+    await user.click(await screen.findByRole("button", { name: /save file/i }));
+
+    // Nothing was written, so nothing is claimed; the file can still be
+    // saved or shown as a code.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(useUi.getState().toast).toBeNull();
+    expect(screen.getByRole("button", { name: /save file/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /show qr code/i })).toBeInTheDocument();
+  });
+
+  it("shows the frames as a code, one after the other", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    mockIPC((cmd) => {
+      if (cmd === "export_backup") {
+        return {
+          data: "R0ZCQUNLVVA=",
+          frames: ["ur:bytes/1-2/aaa", "ur:bytes/2-2/bbb"],
+          wallet_count: 2,
+          size_bytes: 900,
+        };
+      }
+      throw new Error(`unexpected command ${cmd}`);
+    });
+    renderModal(
+      <BackupExportModal
+        open
+        onClose={() => {}}
+        wallets={WALLETS}
+        activeNetwork="signet"
+      />,
+    );
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    await user.type(screen.getByLabelText("Password"), "correct horse");
+    await user.type(screen.getByLabelText("Confirm password"), "correct horse");
+    await user.click(screen.getByRole("button", { name: /create backup/i }));
+    await screen.findByText(/2 wallets ·/);
+    await user.click(screen.getByRole("button", { name: /show qr code/i }));
+
+    expect(
+      await screen.findByRole("img", { name: "Backup QR code, frame 1 of 2" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    // The scanner shows the same numerals and means progress by them.
+    // This counter is a place in a loop, and the caption says so.
+    expect(screen.getByText(/The code loops: start at any frame\./)).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(200);
+    await waitFor(() => {
+      expect(
+        screen.getByRole("img", { name: "Backup QR code, frame 2 of 2" }),
+      ).toBeInTheDocument();
+    });
+  });
+});
+
+describe("restoring a backup", () => {
+  it("a wrong password says so in plain words", async () => {
+    mockIPC((cmd) => {
+      switch (cmd) {
+        case "pick_backup_file":
+          return PICKED;
+        case "preview_backup":
+          return Promise.reject({
+            kind: "wrong_key",
+            message: "vault decryption failed: wrong key or corrupted file",
+          });
+        default:
+          throw new Error(`unexpected command ${cmd}`);
+      }
+    });
+    renderModal(<BackupRestoreModal open onClose={() => {}} activeNetwork="signet" />);
+    const user = userEvent.setup();
+
+    // Nothing to open before a source is held.
+    expect(screen.getByRole("button", { name: /open backup/i })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /open a file/i }));
+    await screen.findByText(/Backup read from/);
+    await user.type(screen.getByLabelText("Password"), "wrong one");
+    await user.click(screen.getByRole("button", { name: /open backup/i }));
+
+    // The core's own wording would say "vault decryption failed"; the
+    // screen says what it means to the person typing.
+    expect(
+      await screen.findByText("Wrong password, or the file is damaged."),
+    ).toBeInTheDocument();
+  });
+
+  it("says a file far too large to be a backup in a sentence", async () => {
+    mockIPC((cmd) => {
+      switch (cmd) {
+        case "pick_backup_file":
+          return Promise.reject({
+            kind: "invalid_input",
+            message: "this file is far too large to be a Gerfaut backup",
+          });
+        default:
+          throw new Error(`unexpected command ${cmd}`);
+      }
+    });
+    renderModal(<BackupRestoreModal open onClose={() => {}} activeNetwork="signet" />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /open a file/i }));
+
+    expect(
+      await screen.findByText("This file is far too large to be a Gerfaut backup."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/^this file/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /open backup/i })).toBeDisabled();
+  });
+
+  it("says a file that is not a backup is not one", async () => {
+    // A picture, a vault, a QR code of something else: the password is
+    // not in question, and saying it is would send someone retyping a
+    // password that may well be right.
+    mockIPC((cmd) => {
+      switch (cmd) {
+        case "pick_backup_file":
+          return PICKED;
+        case "preview_backup":
+          return Promise.reject({
+            kind: "unreadable_backup",
+            message: "invalid backup: this is not a Gerfaut backup",
+          });
+        default:
+          throw new Error(`unexpected command ${cmd}`);
+      }
+    });
+    renderModal(<BackupRestoreModal open onClose={() => {}} activeNetwork="signet" />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /open a file/i }));
+    await screen.findByText(/Backup read from/);
+    await user.type(screen.getByLabelText("Password"), "correct horse");
+    await user.click(screen.getByRole("button", { name: /open backup/i }));
+
+    expect(
+      await screen.findByText("This is not a Gerfaut backup, or it is damaged."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/wrong password/i)).not.toBeInTheDocument();
+  });
+
+  it("says a newer Gerfaut made the backup, whichever layer is newer", async () => {
+    // A password that was right must not be blamed. The envelope, the
+    // key profile and the payload can each be newer than this build;
+    // the core gives all three one code, and the screen one sentence.
+    const refusals = [
+      {
+        kind: "newer_format",
+        message:
+          "invalid backup: this backup was written by a newer Gerfaut (backup version 2); update Gerfaut to open it",
+      },
+      {
+        kind: "newer_format",
+        message:
+          "invalid backup: this backup was written by a newer Gerfaut (file version 3); update Gerfaut to open it",
+      },
+    ];
+    let attempt = 0;
+    mockIPC((cmd) => {
+      switch (cmd) {
+        case "pick_backup_file":
+          return PICKED;
+        case "preview_backup":
+          return Promise.reject(refusals[attempt++]);
+        default:
+          throw new Error(`unexpected command ${cmd}`);
+      }
+    });
+    renderModal(<BackupRestoreModal open onClose={() => {}} activeNetwork="signet" />);
+    const user = userEvent.setup();
+    const sentence =
+      "This backup was made with a newer version of Gerfaut. Update Gerfaut to open it.";
+
+    await user.click(screen.getByRole("button", { name: /open a file/i }));
+    await screen.findByText(/Backup read from/);
+    await user.type(screen.getByLabelText("Password"), "correct horse");
+    await user.click(screen.getByRole("button", { name: /open backup/i }));
+    expect(await screen.findByText(sentence)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /open backup/i }));
+    await waitFor(() => expect(attempt).toBe(2));
+    expect(await screen.findByText(sentence)).toBeInTheDocument();
+    expect(screen.queryByText(/wrong password/i)).not.toBeInTheDocument();
+  });
+
+  it("unchecking a wallet leaves it out of the restore", async () => {
+    let sent: unknown = null;
+    mockIPC((cmd, args) => {
+      switch (cmd) {
+        case "pick_backup_file":
+          return PICKED;
+        case "preview_backup":
+          return PREVIEW;
+        case "import_backup":
+          sent = args;
+          return { added: [WALLETS[0]], skipped: 1, settings_applied: false };
+        case "sync_all":
+          return { reports: [], failures: [] };
+        default:
+          throw new Error(`unexpected command ${cmd}`);
+      }
+    });
+
+    // Drive the preview step through the file path.
+    renderModal(<BackupRestoreModal open onClose={() => {}} activeNetwork="signet" />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /open a file/i }));
+    await screen.findByText(/Backup read from/);
+    await user.type(screen.getByLabelText("Password"), "correct horse");
+    await user.click(screen.getByRole("button", { name: /open backup/i }));
+
+    await screen.findByText("Savings");
+    const boxes = screen.getAllByRole("checkbox");
+    expect(boxes).toHaveLength(2);
+    // A wallet already watched cannot be chosen twice.
+    expect(boxes[1]).toBeDisabled();
+    expect(boxes[1]).not.toBeChecked();
+    expect(boxes[0]).toBeChecked();
+    expect(screen.getByRole("button", { name: /restore 1 wallet/i })).toBeInTheDocument();
+
+    // Unchecking the only pickable wallet leaves nothing to restore,
+    // and the action says so instead of sending an empty list.
+    await user.click(boxes[0]);
+    expect(boxes[0]).not.toBeChecked();
+    expect(screen.getByRole("button", { name: /restore 0 wallets/i })).toBeDisabled();
+
+    await user.click(boxes[0]);
+    await user.click(screen.getByRole("switch", { name: /apply node settings/i }));
+    await user.click(screen.getByRole("button", { name: /restore 1 wallet/i }));
+
+    await waitFor(() => {
+      expect(sent).not.toBeNull();
+    });
+    const choices = (sent as { choices: { indexes: number[]; apply_settings: boolean } })
+      .choices;
+    expect(choices.indexes).toEqual([0]);
+    expect(choices.apply_settings).toBe(true);
+  });
+
+  /** The wallets came in, then moving the workspace to their network
+      failed: the restore still succeeded, and the toast says where
+      they are rather than leaving them to be looked for. */
+  it("names the network of wallets it could not bring into sight", async () => {
+    const onClose = vi.fn();
+    let syncedOn: unknown = null;
+    mockIPC((cmd, args) => {
+      switch (cmd) {
+        case "pick_backup_file":
+          return PICKED;
+        case "preview_backup":
+          return PREVIEW;
+        case "import_backup":
+          return { added: [WALLETS[0]], skipped: 1, settings_applied: false };
+        case "set_active_network":
+          return Promise.reject({ kind: "vault", message: "the vault could not be written" });
+        // Still running: its own toast would take the restore's place.
+        case "sync_all":
+          syncedOn = (args as { network?: string }).network;
+          return new Promise(() => {});
+        default:
+          throw new Error(`unexpected command ${cmd}`);
+      }
+    });
+    renderModal(<BackupRestoreModal open onClose={onClose} activeNetwork="mainnet" />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /open a file/i }));
+    await screen.findByText(/Backup read from/);
+    await user.type(screen.getByLabelText("Password"), "correct horse");
+    await user.click(screen.getByRole("button", { name: /open backup/i }));
+    await user.click(await screen.findByRole("button", { name: /restore 1 wallet/i }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(useUi.getState().toast).toBe("1 wallet restored on Signet");
+    // Their first sync goes where they are, not to the workspace's.
+    expect(syncedOn).toBe("signet");
+  });
+
+  /** A backup written by hand with a private key in it: the core
+      refuses the whole restore, and the screen says why in its own
+      words, not as some input rejected. */
+  it("says a private key stopped the restore, and that nothing came in", async () => {
+    let refusal = { kind: "private_material", message: "input contains private key material and was rejected" };
+    mockIPC((cmd) => {
+      switch (cmd) {
+        case "pick_backup_file":
+          return PICKED;
+        case "preview_backup":
+          return PREVIEW;
+        case "import_backup":
+          return Promise.reject(refusal) as never;
+        default:
+          throw new Error(`unexpected command ${cmd}`);
+      }
+    });
+    renderModal(<BackupRestoreModal open onClose={() => {}} activeNetwork="signet" />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /open a file/i }));
+    await screen.findByText(/Backup read from/);
+    await user.type(screen.getByLabelText("Password"), "correct horse");
+    await user.click(screen.getByRole("button", { name: /open backup/i }));
+    await screen.findByText("Cold storage");
+
+    await user.click(screen.getByRole("button", { name: /restore 1 wallet/i }));
+    expect(
+      await screen.findByText(
+        "A wallet in this backup holds a private key, and Gerfaut only watches: nothing was restored.",
+      ),
+    ).toBeInTheDocument();
+
+    refusal = { kind: "descriptor", message: "descriptor error: Invalid descriptor" };
+    await user.click(screen.getByRole("button", { name: /restore 1 wallet/i }));
+    expect(
+      await screen.findByText(
+        "A wallet in this backup is not a descriptor Gerfaut can watch, so nothing was restored. The core says: descriptor error: Invalid descriptor",
+      ),
+    ).toBeInTheDocument();
+
+    // The core names the wallet it refuses, a private key included,
+    // under `invalid_input`: the screen keeps those words.
+    refusal = {
+      kind: "invalid_input",
+      message:
+        'invalid backup: "Hot" cannot be restored: input contains private key material and was rejected',
+    };
+    await user.click(screen.getByRole("button", { name: /restore 1 wallet/i }));
+    expect(
+      await screen.findByText(
+        'Nothing was restored. The core says: invalid backup: "Hot" cannot be restored: input contains private key material and was rejected',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("names the server and the certificate the settings would put in place", async () => {
+    // A backup is a file someone can be handed. Agreeing to "apply node
+    // settings" without seeing them meant agreeing to a server and a
+    // pinned certificate nobody had read — every address of every
+    // wallet on that network, to whoever wrote the file.
+    mockIPC((cmd) => {
+      switch (cmd) {
+        case "pick_backup_file":
+          return PICKED;
+        case "preview_backup":
+          return PREVIEW;
+        default:
+          throw new Error(`unexpected command ${cmd}`);
+      }
+    });
+    renderModal(<BackupRestoreModal open onClose={() => {}} activeNetwork="signet" />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /open a file/i }));
+    await screen.findByText(/Backup read from/);
+    await user.type(screen.getByLabelText("Password"), "correct horse");
+    await user.click(screen.getByRole("button", { name: /open backup/i }));
+    await screen.findByText("Savings");
+
+    expect(
+      screen.getByText(
+        /Replaces your backend choice and gap limit with the backup's, and adds the certificates it accepted\./,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("mempool.space")).toBeInTheDocument();
+    expect(screen.getByText("Signet")).toBeInTheDocument();
+    expect(screen.getByText("Pinned certificate")).toBeInTheDocument();
+    expect(screen.getByText("electrum.example.org:51002")).toBeInTheDocument();
+  });
+
+  /** A wallet the core would refuse, two descriptors of two wallets
+      handed over in one backup, is left out of the restore before it is
+      asked for, and the reason is on screen; the others restore. */
+  it("a wallet the core refuses stays on the list, out of reach, saying why", async () => {
+    const reason =
+      "descriptor error: the change descriptor does not spend under the receive descriptor's keys and conditions: change would go to another wallet";
+    mockIPC((cmd) => {
+      switch (cmd) {
+        case "pick_backup_file":
+          return PICKED;
+        case "preview_backup":
+          return {
+            ...PREVIEW,
+            wallets: [
+              PREVIEW.wallets[0],
+              { ...PREVIEW.wallets[0], index: 1, name: "Handed over", refused: reason },
+            ],
+          };
+        case "import_backup":
+          return { added: [WALLETS[0]], skipped: 0, settings_applied: false, refused: [] };
+        case "sync_all":
+          return { reports: [], failures: [] };
+        default:
+          throw new Error(`unexpected command ${cmd}`);
+      }
+    });
+    renderModal(<BackupRestoreModal open onClose={() => {}} activeNetwork="signet" />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /open a file/i }));
+    await screen.findByText(/Backup read from/);
+    await user.type(screen.getByLabelText("Password"), "correct horse");
+    await user.click(screen.getByRole("button", { name: /open backup/i }));
+
+    const refused = await screen.findByRole("checkbox", { name: /Handed over/ });
+    expect(refused).toHaveAccessibleName(/Cannot be restored/);
+    expect(refused).toBeDisabled();
+    expect(refused).not.toBeChecked();
+    expect(screen.getByText(reason)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /Cold storage/ })).toBeChecked();
+
+    // The others restore, and the toast names the one left out (the
+    // sync that follows says its own a moment later).
+    const toasts: (string | null)[] = [];
+    const unsubscribe = useUi.subscribe((state) => toasts.push(state.toast));
+    await user.click(screen.getByRole("button", { name: /restore 1 wallet/i }));
+    await waitFor(() => expect(toasts).toContain("1 wallet restored · 1 left out: Handed over"));
+    unsubscribe();
+  });
+
+  it("a wallet already watched stays on the list, greyed and out of reach", async () => {
+    mockIPC((cmd) => {
+      switch (cmd) {
+        case "pick_backup_file":
+          return PICKED;
+        case "preview_backup":
+          return PREVIEW;
+        default:
+          throw new Error(`unexpected command ${cmd}`);
+      }
+    });
+    renderModal(<BackupRestoreModal open onClose={() => {}} activeNetwork="signet" />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /open a file/i }));
+    await screen.findByText(/Backup read from/);
+    await user.type(screen.getByLabelText("Password"), "correct horse");
+    await user.click(screen.getByRole("button", { name: /open backup/i }));
+
+    // Shown rather than dropped: a backup that seems to have lost a
+    // wallet is worse than one that says why it will skip it. A screen
+    // reader gets the reason with the name, not beside it.
+    const watched = await screen.findByRole("checkbox", { name: /Savings/ });
+    expect(watched).toHaveAccessibleName(/Already watched/);
+    expect(watched).toBeDisabled();
+    expect(watched).not.toBeChecked();
+    // The name drops to the weight of the line under it; the wallet
+    // that can be restored keeps the full one.
+    expect(screen.getByText("Savings")).toHaveClass("text-muted");
+    expect(screen.getByText("Cold storage")).toHaveClass("text-text");
+
+    // Clicking its label cannot slip it back into the restore.
+    await user.click(screen.getByText("Savings"));
+    expect(watched).not.toBeChecked();
+    expect(screen.getByRole("button", { name: /restore 1 wallet/i })).toBeInTheDocument();
+  });
+
+  it("a file dialog closed on nothing changes nothing", async () => {
+    mockIPC((cmd) => {
+      if (cmd === "pick_backup_file") return null;
+      throw new Error(`unexpected command ${cmd}`);
+    });
+    renderModal(<BackupRestoreModal open onClose={() => {}} activeNetwork="signet" />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /open a file/i }));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByText(/Backup read from/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /open backup/i })).toBeDisabled();
+  });
+
+  it("a file lands in plain words and hands the caret to the password", async () => {
+    mockIPC((cmd) => {
+      if (cmd === "pick_backup_file") return PICKED;
+      throw new Error(`unexpected command ${cmd}`);
+    });
+    renderModal(<BackupRestoreModal open onClose={() => {}} activeNetwork="signet" />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /open a file/i }));
+
+    expect(await screen.findByText(/Backup read from/)).toHaveTextContent(
+      "Backup read from backup.gerfaut",
+    );
+    expect(screen.getByText("Type its password to open it.")).toBeInTheDocument();
+
+    // The caret lands on the next step, and what just happened is read
+    // out with it rather than left to a panel a screen reader may miss.
+    const field = screen.getByLabelText("Password");
+    await waitFor(() => expect(field).toHaveFocus());
+    expect(field).toHaveAccessibleDescription(/Backup read from backup\.gerfaut/);
+    expect(screen.getByRole("button", { name: /open backup/i })).toBeEnabled();
+  });
+
+  it("a scan lands the same way, with the scanner gone and the camera off", async () => {
+    // The scanner sends each frame once to a scan the core holds.
+    const seen: string[] = [];
+    mockIPC((cmd, args) => {
+      if (cmd === "open_qr_scan") return 1;
+      if (cmd === "close_qr_scan") return null;
+      if (cmd !== "push_qr_frame") throw new Error(`unexpected command ${cmd}`);
+      seen.push((args as { frame: string }).frame);
+      return {
+        format: "ur",
+        received: seen.length,
+        total: 2,
+        complete: seen.length === 2,
+        text: seen.length === 2 ? "gerfaut-backup:R0ZCQUNLVVA=" : null,
+      };
+    });
+    cameraFrames.push("ur:bytes/1-2/aaaa", "ur:bytes/2-2/bbbb");
+    const { tick, track } = fakeCamera();
+
+    renderModal(<BackupRestoreModal open onClose={() => {}} activeNetwork="signet" />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /scan a qr code/i }));
+    await waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled());
+
+    // Both screens count fragments, so the scanner's denominator is the
+    // sending screen's frame count, and it climbs one at a time.
+    await tick();
+    expect(await screen.findByRole("progressbar")).toHaveAttribute("aria-valuenow", "1");
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    await tick();
+
+    // The scanner closes on the last frame, and the page it uncovers
+    // says what it now holds instead of a grey line that reads as a
+    // crash after a bar that looked stuck.
+    await waitFor(() => expect(screen.queryByRole("progressbar")).not.toBeInTheDocument());
+    expect(await screen.findByText(/Backup read from/)).toHaveTextContent(
+      "Backup read from the QR code",
+    );
+    expect(screen.getByText("Type its password to open it.")).toBeInTheDocument();
+
+    const field = screen.getByLabelText("Password");
+    await waitFor(() => expect(field).toHaveFocus());
+    expect(field).toHaveAccessibleDescription(/Backup read from the QR code/);
+    expect(screen.getByRole("button", { name: /open backup/i })).toBeEnabled();
+    // Nothing keeps the webcam once the scan is over.
+    expect(track.stop).toHaveBeenCalled();
+  });
+
+  /** The restore scanner tells a code holding a private key what this
+      screen waits for: a backup, not a key, nor a wallet to import. */
+  it("says a private key in the words of the restore", async () => {
+    mockIPC((cmd) => {
+      if (cmd === "open_qr_scan") return 1;
+      if (cmd === "close_qr_scan") return null;
+      if (cmd !== "push_qr_frame") throw new Error(`unexpected command ${cmd}`);
+      return Promise.reject({
+        kind: "private_material",
+        message: "input contains private key material and was rejected",
+      });
+    });
+    cameraFrames.push("ur:crypto-output/1-1/private");
+    const { tick } = fakeCamera();
+
+    renderModal(<BackupRestoreModal open onClose={() => {}} activeNetwork="signet" />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /scan a qr code/i }));
+    await waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled());
+    await tick();
+
+    const scanner = await screen.findByRole("dialog", { name: "Scan a QR code" });
+    expect(await within(scanner).findByRole("alert")).toHaveTextContent(PRIVATE_KEY_NOT_A_BACKUP);
+  });
+});

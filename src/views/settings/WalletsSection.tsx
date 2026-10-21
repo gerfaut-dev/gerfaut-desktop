@@ -1,0 +1,516 @@
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  GripVertical,
+  Pencil,
+  ScanSearch,
+  Trash2,
+  Wallet as WalletIcon,
+  X,
+} from "lucide-react";
+import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
+import { clsx } from "clsx";
+import { Button, Disclosure, IconButton } from "../../components/Button";
+import { CoverageBadge } from "../../components/CoverageBadge";
+import { DropLine, useDragReorder } from "../../components/DragReorder";
+import { Notice } from "../../components/Notice";
+import { errorMessage, isCommandError } from "../../lib/ipc";
+import type { WalletMeta } from "../../lib/ipc";
+import { moveItem } from "../../lib/reorder";
+import { walletGlyph } from "../../lib/walletIcons";
+import { coverageOf, useLiveStatus } from "../../state/live";
+import {
+  useRemoveWallet,
+  useRenameWallet,
+  useRescanWallet,
+  useSetGapLimit,
+  useSetWalletIcon,
+  useSetWalletLivePinned,
+} from "../../state/queries";
+import { useUi } from "../../state/store";
+import { useWalletOrder } from "../../state/walletOrder";
+import { SaveFailure, SectionCard, SettingRow, Toggle } from "./primitives";
+import { WalletIconPicker } from "./WalletIconPicker";
+
+/** Numeric gap-limit field: commits on blur or Enter, clamped to what
+    the backend accepts, shared by every wallet. A value the vault
+    refused goes back to the one it holds. */
+function GapLimitField({
+  gapLimit,
+  onFailure,
+}: {
+  gapLimit: number;
+  onFailure: (error: unknown) => void;
+}) {
+  const { showToast } = useUi();
+  const setGapLimit = useSetGapLimit();
+  const [draft, setDraft] = useState(String(gapLimit));
+
+  // Follow external changes (another commit, a vault reload).
+  useEffect(() => setDraft(String(gapLimit)), [gapLimit]);
+
+  const commit = () => {
+    const value = Number.parseInt(draft, 10);
+    if (Number.isNaN(value) || value < 1 || value > 500) {
+      setDraft(String(gapLimit));
+      return;
+    }
+    if (value === gapLimit) return;
+    onFailure(null);
+    void setGapLimit.mutateAsync(value).then(
+      () => showToast("Setting saved"),
+      (error) => {
+        setDraft(String(gapLimit));
+        onFailure(error);
+      },
+    );
+  };
+
+  return (
+    <input
+      id="gap-limit"
+      value={draft}
+      onChange={(event) => setDraft(event.target.value.replace(/\D/g, ""))}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") commit();
+      }}
+      inputMode="numeric"
+      aria-label="Gap limit"
+      className="field-focus selectable tabular h-11 w-24 rounded-sm border border-transparent bg-sunken px-3 text-right font-ui text-sm text-text"
+    />
+  );
+}
+
+/** Where a refused gap limit is said, among the rows' wallet ids. */
+const GAP_LIMIT = "gap-limit";
+
+/** The shared gap limit, then every wallet of the shown network in the
+    order it is listed everywhere, with what can be done to it: move,
+    change its icon, rescan, rename, remove. */
+export function WalletsSection({
+  wallets,
+  gapLimit,
+}: {
+  wallets: WalletMeta[];
+  gapLimit: number;
+}) {
+  const { showToast, syncErrors } = useUi();
+  const removeWallet = useRemoveWallet();
+  const renameWallet = useRenameWallet();
+  const setIcon = useSetWalletIcon();
+  const rescan = useRescanWallet();
+  const { shown, reorder } = useWalletOrder(wallets);
+  const drag = useDragReorder(shown, reorder);
+  // How much of each wallet the live watch hears: a badge on the rows
+  // only while it is short of room.
+  const live = useLiveStatus();
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  /** What a removal left behind, under its row. */
+  const [removeFailure, setRemoveFailure] = useState<{ id: string; error: unknown } | null>(
+    null,
+  );
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const [rescanning, setRescanning] = useState<string | null>(null);
+  /** A change the vault refused, under the row it was for: the gap
+      limit's, or a wallet's name or icon. */
+  const [saveFailure, setSaveFailure] = useState<{ id: string; error: unknown } | null>(null);
+  const failureOf = (id: string) => (saveFailure?.id === id ? saveFailure.error : null);
+  // One wallet has no order to speak of.
+  const movable = shown.length > 1;
+
+  const commitRename = () => {
+    if (!renaming || renaming.name.trim().length === 0) return;
+    const { id } = renaming;
+    setSaveFailure(null);
+    // Refused, the field stays open on the name typed.
+    void renameWallet.mutateAsync({ id, name: renaming.name.trim() }).then(
+      () => {
+        setRenaming(null);
+        showToast("Setting saved");
+      },
+      (error) => setSaveFailure({ id, error }),
+    );
+  };
+
+  return (
+    <SectionCard
+      icon={<WalletIcon size={18} strokeWidth={1.5} />}
+      title="Wallets"
+    >
+      <div className="mb-4 border-b border-border pb-4">
+        <SettingRow
+          title="Gap limit"
+          hint="How many unused addresses Gerfaut scans past the last used one. Rescan a wallet to look again from its first address."
+        >
+          <GapLimitField
+            gapLimit={gapLimit}
+            onFailure={(error) => setSaveFailure(error === null ? null : { id: GAP_LIMIT, error })}
+          />
+        </SettingRow>
+        <SaveFailure error={failureOf(GAP_LIMIT)} />
+      </div>
+      {shown.length === 0 ? (
+        <p className="font-ui text-sm text-muted">No wallets on this network yet.</p>
+      ) : (
+        // The line lives beside the list, not in it: a list holds items only.
+        <div className="relative">
+          <ul ref={drag.listRef} className="flex flex-col gap-2">
+            {shown.map((wallet, index) => {
+              const single = wallet.kind.type === "single_address";
+              const Glyph = walletGlyph(wallet.icon);
+              const coverage = coverageOf(live.data?.status, wallet.id);
+              const dragging = drag.dragging === index;
+              const first = index === 0;
+              const last = index === shown.length - 1;
+              return (
+                <li
+                  key={wallet.id}
+                  {...drag.rowProps(index)}
+                  className={clsx(
+                    // The grip's glyph then starts where a row without one starts.
+                    "group rounded-md border border-border bg-surface py-3 pr-4",
+                    movable ? "pl-1" : "pl-4",
+                    dragging && "relative z-10 opacity-80",
+                  )}
+                >
+                  {/* The name takes the room there is, and the actions go
+                      under it when the row is too narrow for both: a row
+                      that squeezed the name to nothing named nothing. A
+                      coverage badge beside the name asks for that much
+                      more before the actions may stay on its line. */}
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                    <span
+                      className={clsx(
+                        "flex min-w-0 items-center gap-2.5",
+                        coverage ? "flex-[1_1_20rem]" : "flex-[1_1_10rem]",
+                      )}
+                    >
+                      {movable && (
+                        <span
+                          aria-hidden
+                          title="Drag to reorder"
+                          {...drag.handleProps(index)}
+                          className={clsx(
+                            "inline-flex size-10 shrink-0 items-center justify-center rounded-sm text-muted",
+                            "transition-colors duration-150 hover:text-text",
+                            dragging ? "cursor-grabbing" : "cursor-grab",
+                          )}
+                        >
+                          <GripVertical size={16} strokeWidth={1.5} />
+                        </span>
+                      )}
+                      <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-md bg-sunken text-text">
+                        <Glyph size={16} strokeWidth={1.5} aria-hidden />
+                      </span>
+                      {renaming?.id === wallet.id ? (
+                        <span className="flex items-center gap-1.5">
+                          <input
+                            autoFocus
+                            autoComplete="off"
+                            value={renaming.name}
+                            onChange={(event) =>
+                              setRenaming({ id: wallet.id, name: event.target.value })
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") commitRename();
+                              if (event.key === "Escape") setRenaming(null);
+                            }}
+                            className="field-focus h-9 w-56 rounded-sm border border-transparent bg-sunken px-2 font-ui text-sm text-text"
+                            aria-label="Wallet name"
+                          />
+                          <IconButton
+                            label="Save name"
+                            className="size-9 text-primary"
+                            onClick={commitRename}
+                          >
+                            <Check size={16} strokeWidth={2} aria-hidden />
+                          </IconButton>
+                          <IconButton
+                            label="Cancel renaming"
+                            className="size-9"
+                            onClick={() => setRenaming(null)}
+                          >
+                            <X size={16} strokeWidth={1.5} aria-hidden />
+                          </IconButton>
+                        </span>
+                      ) : (
+                        <span className="flex min-w-0 flex-col">
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span
+                              title={wallet.name}
+                              className="truncate font-ui text-sm font-medium text-text"
+                            >
+                              {wallet.name}
+                            </span>
+                            {coverage && <CoverageBadge coverage={coverage} />}
+                          </span>
+                          <span className="truncate font-ui text-xs text-muted">
+                            {single ? "Single address" : "Descriptor wallet"}
+                          </span>
+                        </span>
+                      )}
+                    </span>
+                    {renaming?.id !== wallet.id && confirmRemove !== wallet.id && (
+                      <span className="ml-auto flex shrink-0 flex-wrap items-center gap-1">
+                        {movable && (
+                          <>
+                            <MoveButton
+                              label="Move up"
+                              blocked={first}
+                              onClick={() => reorder(moveItem(shown, index, index - 1))}
+                            >
+                              <ChevronUp size={16} strokeWidth={1.5} aria-hidden />
+                            </MoveButton>
+                            <MoveButton
+                              label="Move down"
+                              blocked={last}
+                              onClick={() => reorder(moveItem(shown, index, index + 1))}
+                            >
+                              <ChevronDown size={16} strokeWidth={1.5} aria-hidden />
+                            </MoveButton>
+                          </>
+                        )}
+                        <WalletIconPicker
+                          name={wallet.name}
+                          value={wallet.icon}
+                          disabled={rescanning !== null}
+                          onChoose={(icon) => {
+                            setSaveFailure(null);
+                            void setIcon.mutateAsync({ id: wallet.id, icon }).then(
+                              () => showToast("Icon changed"),
+                              (error) => setSaveFailure({ id: wallet.id, error }),
+                            );
+                          }}
+                        />
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          icon={ScanSearch}
+                          disabled={rescanning !== null && rescanning !== wallet.id}
+                          busy={rescanning === wallet.id}
+                          onClick={() => {
+                            setRescanning(wallet.id);
+                            void rescan
+                              .mutateAsync(wallet.id)
+                              .catch(() => undefined)
+                              .finally(() => setRescanning(null));
+                          }}
+                        >
+                          {rescanning === wallet.id ? "Rescanning…" : "Rescan"}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={rescanning !== null}
+                          onClick={() => {
+                            setConfirmRemove(null);
+                            setRenaming({ id: wallet.id, name: wallet.name });
+                          }}
+                          icon={Pencil}
+                        >
+                          Rename
+                        </Button>
+                        {/* Neutral here: red belongs to the confirmation
+                            step, on its yes below, never to a lone remove
+                            button. */}
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={rescanning !== null}
+                          onClick={() => {
+                            setRenaming(null);
+                            setConfirmRemove(wallet.id);
+                          }}
+                          icon={Trash2}
+                        >
+                          Remove
+                        </Button>
+                      </span>
+                    )}
+                  </div>
+                  {syncErrors[wallet.id] && (
+                    <p className="mt-2 font-ui text-xs text-muted">
+                      {syncErrors[wallet.id]}
+                    </p>
+                  )}
+                  <SaveFailure error={failureOf(wallet.id)} />
+                  {confirmRemove === wallet.id && (
+                    <Notice
+                      tone="info"
+                      className="mt-3"
+                      // Cancel first, the destructive yes last: the way
+                      // out comes before the way through, here as on
+                      // the mobile.
+                      action={<span className="flex items-center gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onTint
+                          onClick={() => setConfirmRemove(null)}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          busy={removeWallet.isPending}
+                          onClick={() => {
+                            setRemoveFailure(null);
+                            removeWallet.mutate(wallet.id, {
+                              onSuccess: () => {
+                                setConfirmRemove(null);
+                                showToast("Wallet removed");
+                              },
+                              onError: (error) => setRemoveFailure({ id: wallet.id, error }),
+                            });
+                          }}
+                        >
+                          Remove wallet
+                        </Button>
+                      </span>}
+                    >
+                      Removing "{wallet.name}" deletes its labels and cached
+                      history from Gerfaut, and cannot be undone. It only stops
+                      watching: nothing moves on chain.
+                    </Notice>
+                  )}
+                  {confirmRemove === wallet.id && removeFailure?.id === wallet.id && (
+                    <p role="alert" className="mt-2 font-ui text-xs text-muted">
+                      Not removed: {errorMessage(removeFailure.error)}
+                    </p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          <DropLine y={drag.lineY} />
+        </div>
+      )}
+      {shown.length > 0 && <LivePins wallets={shown} />}
+    </SectionCard>
+  );
+}
+
+/** "Always watch live first": an advanced setting, folded away. When
+    the live watch cannot follow every address, it serves the pinned
+    wallets before the others, then the ones holding coins. Pinning many
+    large wallets can leave the rest to the syncs, which is the user's
+    call to make, and why the switch is out of the way. */
+function LivePins({ wallets }: { wallets: WalletMeta[] }) {
+  const { showToast } = useUi();
+  const pin = useSetWalletLivePinned();
+  const [open, setOpen] = useState(false);
+  /** What the vault refused, under the wallet it was for. */
+  const [failure, setFailure] = useState<{ id: string; error: unknown } | null>(null);
+  const pinned = wallets.filter((wallet) => wallet.live_pinned === true).length;
+
+  return (
+    <div className="mt-4 border-t border-border pt-3">
+      <Disclosure
+        open={open}
+        className="-ml-2"
+        aria-controls="live-pins"
+        onClick={() => setOpen(!open)}
+      >
+        {/* One run of text, so the dot sits between two equal spaces
+            and the name read out is the line as written. */}
+        <span>
+          Advanced
+          {!open && pinned > 0 && " "}
+          {!open && pinned > 0 && (
+            <span className="font-normal">
+              · {pinned === 1 ? "1 wallet" : `${pinned} wallets`} watched live first
+            </span>
+          )}
+        </span>
+      </Disclosure>
+      {open && (
+        <div id="live-pins" className="mt-2">
+          <p className="font-ui text-sm font-medium text-text">Always watch live first</p>
+          <p id="live-pins-hint" className="mt-0.5 max-w-xl font-ui text-xs text-muted">
+            When the live watch cannot follow every address, the wallets turned on here are
+            followed first.
+          </p>
+          <ul className="mt-2 flex flex-col divide-y divide-border">
+            {wallets.map((wallet) => {
+              const Glyph = walletGlyph(wallet.icon);
+              return (
+                <li key={wallet.id} className="py-1.5">
+                  <div className="flex min-h-11 items-center justify-between gap-3">
+                    <span className="flex min-w-0 items-center gap-2.5">
+                      <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-md bg-sunken text-text">
+                        <Glyph size={16} strokeWidth={1.5} aria-hidden />
+                      </span>
+                      <span className="truncate font-ui text-sm text-text">{wallet.name}</span>
+                    </span>
+                    <Toggle
+                      checked={wallet.live_pinned === true}
+                      label={`Always watch ${wallet.name} live first`}
+                      describedBy="live-pins-hint"
+                      busy={pin.isPending && pin.variables?.id === wallet.id}
+                      disabled={pin.isPending && pin.variables?.id !== wallet.id}
+                      onChange={(pinned) => {
+                        setFailure(null);
+                        pin.mutate(
+                          { id: wallet.id, pinned },
+                          {
+                            onSuccess: () => showToast("Setting saved"),
+                            onError: (error) => setFailure({ id: wallet.id, error }),
+                          },
+                        );
+                      }}
+                    />
+                  </div>
+                  {failure?.id === wallet.id && (
+                    <p role="alert" className="mt-1 font-ui text-xs text-muted">
+                      {isCommandError(failure.error) ? failure.error.message : String(failure.error)}
+                    </p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The keyboard's way of moving a row: shown when the row is hovered
+    or holds the focus, dimmed at the end it cannot pass. It stays
+    focusable there, so the focus is not dropped on the floor when a
+    row reaches the top or the bottom. */
+function MoveButton({
+  label,
+  blocked,
+  onClick,
+  children,
+}: {
+  label: string;
+  blocked: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      aria-disabled={blocked || undefined}
+      onClick={blocked ? undefined : onClick}
+      className={clsx(
+        "inline-flex size-10 items-center justify-center rounded-md",
+        "opacity-0 transition-[color,background-color,opacity] duration-150 ease-out",
+        "focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100",
+        blocked
+          ? "cursor-default text-muted/40"
+          : "cursor-pointer text-muted hover:bg-sunken hover:text-text active:scale-[0.96]",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
