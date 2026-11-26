@@ -1,0 +1,336 @@
+# shellcheck shell=bash
+# Linux target: .deb, .rpm and .AppImage for x86_64. Sourced by
+# entrypoint.sh, which calls target_fetch with the network and
+# target_build without it.
+#
+# Tauri's bundler makes the three packages, so their content is what a
+# plain `npm run tauri build` ships: same desktop entry, same icons, same
+# dependencies, same binary, which the bundler patches with the kind of
+# package it sits in. What the bundler cannot do is leave the clock out,
+# so each package is then brought to a canonical form:
+#
+#   .deb       unpacked and written again by dpkg-deb, which honours
+#              SOURCE_DATE_EPOCH and sorts the archive members
+#   .rpm       the two time tags overwritten in place (rpm-normalise.py)
+#   .AppImage  the AppDir the bundler leaves behind checked for the
+#              GStreamer plugins and fixed in three ways, the Wayland
+#              libraries left to the system, the icon linuxdeploy links
+#              at its root and the date of every file, then the
+#              AppImage written again from it with the same pinned
+#              plugin and runtime
+
+TRIPLE=x86_64-unknown-linux-gnu
+LINUXDEPLOY_SUMS="$APP/.github/linuxdeploy.sha256"
+RUNTIME_SUMS="$APP/reproducible/linux/appimage-runtime.sha256"
+LINUXDEPLOY_TOOLS="AppRun-x86_64 linuxdeploy-07333c6-x86_64.AppImage linuxdeploy-plugin-appimage.AppImage"
+
+target_fetch() {
+    fetch_cargo "$TRIPLE"
+    # The three tools the AppImage bundler would otherwise download by
+    # itself, unchecked. URLs and hashes: .github/linuxdeploy.sha256. The
+    # gtk and gstreamer scripts are no longer among them: the bundler
+    # carries them inside @tauri-apps/cli, which package-lock.json pins.
+    fetch_pinned "$LINUXDEPLOY_SUMS" AppRun-x86_64 \
+        https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64
+    fetch_pinned "$LINUXDEPLOY_SUMS" linuxdeploy-07333c6-x86_64.AppImage \
+        https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy-07333c6/linuxdeploy-x86_64.AppImage
+    # A tagged release, not the `continuous` one the bundler names, which
+    # is rebuilt every month.
+    fetch_pinned "$LINUXDEPLOY_SUMS" linuxdeploy-plugin-appimage.AppImage \
+        https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-appimage-x86_64.AppImage
+    # The fourth one, see linux/appimage-runtime.sha256.
+    fetch_pinned "$RUNTIME_SUMS" runtime-x86_64 \
+        https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64
+}
+
+target_build() {
+    local version bundle tool
+    version="$(app_version)"
+    bundle="$APP/src-tauri/target/release/bundle"
+
+    # Where the bundler looks before it downloads. It skips a download
+    # when the file is there, and it only marks executable what it
+    # downloaded itself.
+    for tool in $LINUXDEPLOY_TOOLS; do
+        use_pinned "$LINUXDEPLOY_SUMS" "$tool" "$XDG_CACHE_HOME/tauri/$tool"
+        chmod 0755 "$XDG_CACHE_HOME/tauri/$tool"
+    done
+    use_pinned "$RUNTIME_SUMS" runtime-x86_64 "$WORK/tools/runtime-x86_64"
+    export LDAI_RUNTIME_FILE="$WORK/tools/runtime-x86_64"
+    # A container has no FUSE: the linuxdeploy AppImages unpack themselves.
+    export APPIMAGE_EXTRACT_AND_RUN=1
+    gstreamer_plugins
+
+    log "compiling"
+    tauri_build --no-bundle
+    (cd "$APP/src-tauri/target/release" && sha256sum gerfaut-desktop) > "$OUT/build-info/binary.sha256"
+    check_binary "$APP/src-tauri/target/release/gerfaut-desktop"
+
+    log "bundling"
+    (cd "$APP" && npm run tauri -- bundle --ci --bundles deb,rpm,appimage)
+
+    canonical_deb "$bundle/deb/Gerfaut_${version}_amd64.deb" "$OUT/Gerfaut_${version}_amd64.deb"
+    canonical_rpm "$bundle/rpm/Gerfaut-${version}-1.x86_64.rpm" "$OUT/Gerfaut-${version}-1.x86_64.rpm"
+    rewrite_appimage "$bundle/appimage/Gerfaut_${version}_amd64.AppImage"
+    canonical_appimage "$bundle/appimage/Gerfaut_${version}_amd64.AppImage" "$OUT/Gerfaut_${version}_amd64.AppImage"
+}
+
+# The GStreamer plugins the AppImage carries (see rewrite_appimage): those
+# of the image, less seven that no webview uses and that would bring
+# libraries of their own onto the app's LD_LIBRARY_PATH, ahead of the
+# system's. shout2 (Icecast streaming) brings OpenSSL 3.0; jack, the
+# Berkeley DB that the system's libjack then loads in place of its own;
+# aasink and cacasink (text-mode video), ncurses and S-Lang; cdparanoia
+# (audio CDs), 1394 and dv (FireWire camcorders), their device
+# libraries. The bundler's gstreamer plugin copies every file of the
+# directory GSTREAMER_PLUGINS_DIR names; a plain `npm run tauri build`
+# leaves it unset, and that AppImage takes every plugin of the machine.
+GSTREAMER_LEFT_OUT="1394 aasink cacasink cdparanoia dv jack shout2"
+
+gstreamer_plugins() {
+    local from=/usr/lib/x86_64-linux-gnu/gstreamer-1.0 plugin
+    export GSTREAMER_PLUGINS_DIR="$WORK/gstreamer-plugins"
+    rm -rf "$GSTREAMER_PLUGINS_DIR"
+    mkdir -p "$GSTREAMER_PLUGINS_DIR"
+    cp "$from"/libgst*.so "$GSTREAMER_PLUGINS_DIR/"
+    for plugin in $GSTREAMER_LEFT_OUT; do
+        [ -f "$GSTREAMER_PLUGINS_DIR/libgst$plugin.so" ] || die "no GStreamer plugin $plugin in $from to leave out"
+        rm "$GSTREAMER_PLUGINS_DIR/libgst$plugin.so"
+    done
+}
+
+# No path of the build machine in the binary: the remap flags turn every
+# one of them into /gerfaut, /cargo or /rustup. One path of the user's
+# machine is expected: x11rb, which arboard reads the X11 clipboard with,
+# reaches the X server through /tmp/.X11-unix/X<display>.
+check_binary() {
+    local found
+    found="$(strings -n 6 "$1" | grep -E '^/(build|cache|opt|root|home|tmp)/' | grep -vx '/tmp/\.X11-unix/X' || true)"
+    if [ -n "$found" ]; then
+        printf '%s\n' "$found" | LC_ALL=C sort -u | head -n 20 >&2 || true
+        die "the binary embeds a path of the build container"
+    fi
+}
+
+# Tauri writes the ar members and every tar entry with the wall clock,
+# in the order its file walk found them. dpkg-deb writes the same tree
+# with SOURCE_DATE_EPOCH as the only date, members sorted by name, owned
+# by root. gzip for both members, as Tauri does: the default of this
+# dpkg would be zstd, which older releases of Debian cannot open.
+canonical_deb() {
+    local from="$1" to="$2" tree="$WORK/deb-tree"
+    rm -rf "$tree"
+    dpkg-deb --raw-extract "$from" "$tree"
+    # The order of the lines means nothing to dpkg and follows the same
+    # file walk, so it is fixed too.
+    sort -k2 "$tree/DEBIAN/md5sums" > "$tree/DEBIAN/md5sums.sorted"
+    mv "$tree/DEBIAN/md5sums.sorted" "$tree/DEBIAN/md5sums"
+    (cd "$tree" && md5sum --check --quiet --strict DEBIAN/md5sums)
+    find "$tree" -exec touch --no-dereference --date="@$SOURCE_DATE_EPOCH" {} +
+    dpkg-deb --root-owner-group --uniform-compression -Zgzip --build "$tree" "$to" > /dev/null
+    rm -rf "$tree"
+}
+
+canonical_rpm() {
+    local from="$1" to="$2"
+    cp "$from" "$to"
+    python3 "$APP/reproducible/linux/rpm-normalise.py" "$to" "$SOURCE_DATE_EPOCH"
+    # rpm checks the digests the tool has just recomputed.
+    rpm --checksig "$to" > /dev/null || die "the normalised rpm fails its own digests"
+}
+
+# The recipe writes the AppImage again from the AppDir the bundler
+# leaves behind, with the plugin, the runtime and the environment the
+# bundler used: the bundler's last step, repeated. Before that it checks
+# the GStreamer plugins are in, gives GStreamer a registry of its own,
+# takes four libraries out, checks every library left against a
+# committed list and fixes two things that depend on the machine. The
+# contents of the files it keeps are left as they are, but for the line
+# it adds to the GStreamer hook.
+#
+# The GStreamer plugins. WebKit plays every <video> through GStreamer,
+# the camera of the QR scanner included, and linuxdeploy bundles the
+# GStreamer library WebKit links, 1.20 from the image, but none of its
+# plugins. That library looks for them next to itself, in usr/lib/
+# gstreamer-1.0 of the AppDir, and nowhere else: without them it finds
+# no element at all, and the web process aborts as soon as the scanner
+# opens the camera, on every distribution. bundleMediaFramework in
+# tauri.conf.json runs the bundler's gstreamer plugin, which copies the
+# plugins of the image there, the core elements of libgstreamer1.0-0
+# and the gstreamer1.0-plugins-base and -good that WebKit's package
+# depends on, less those gstreamer_plugins leaves out, with the plugin
+# scanner of the same release, and adds an AppRun hook that points
+# GStreamer at them alone, never at the system's. A build that lost
+# them stops here rather than ship an AppImage whose camera kills the
+# window, and so does one that let in a plugin left out or the OpenSSL
+# or Berkeley DB they would have brought.
+#
+# The GStreamer registry, where GStreamer keeps what it learnt of each
+# plugin so as not to load them all at every start. Unless told
+# otherwise it is the system's, ~/.cache/gstreamer-1.0/
+# registry.x86_64.bin. An AppImage that shared it wrote its own plugins
+# into it, under a mount point that changes at every start; the system's
+# GStreamer then found its plugins gone, scanned them all again and
+# wrote them back, and the AppImage did the same at its next start. The
+# recipe appends to the bundler's hook a line that points
+# GST_REGISTRY_1_0 at a file of Gerfaut's own, in the folder Tauri gives
+# the app under the user's cache. The AppImage still scans its plugins
+# again at each start, their paths changing with the mount point; what
+# the line buys is the system's registry left alone.
+# GStreamer makes the folder when it first writes the file.
+#
+# The Wayland libraries, libwayland-client, -cursor, -egl and -server.
+# linuxdeploy copies those of the image (Ubuntu 22.04, Wayland 1.20)
+# because GTK and WebKit link them, so they are loaded first and the
+# system's Mesa gets them too. A newer Mesa needs newer symbols (Mesa 26
+# asks for wl_display_dispatch_queue_timeout, Wayland 1.24), fails to
+# load, and WebKit stops on "Could not create default EGL display": a
+# white window (tauri-apps/tauri#15976). The system's GTK and Mesa
+# bring their own, so they are left to it, as the AppImage excludelist
+# does for libwayland-client (AppImageCommunity/pkg2appimage#559). The
+# bundler passes linuxdeploy no --exclude-library (tauri-apps/tauri#15662).
+#
+# The icon linuxdeploy links at the root of the AppDir, named after the
+# Icon= key of the desktop entry. The linuxdeploy Tauri pinned before
+# 07333c6 took the first matching icon its directory walk found, and
+# that order depends on the file system: two runners gave 32x32 and
+# 64x64. linuxdeploy now chooses by size (appdir_root_setup.cpp): the
+# closer to 64x64 the better, the larger on a tie. The recipe applies
+# that rule too, with the path as the last tie-breaker, so a change of
+# linuxdeploy cannot move the icon unseen: the log names both choices.
+#
+# The dates. The mksquashfs inside appimagetool only brings a date later
+# than SOURCE_DATE_EPOCH down to it, and leaves an earlier one alone.
+# Some directories of the AppDir, such as the gtk-3.0 one the gtk plugin
+# copies from the image, carry the date the image was built: a build
+# with an image older than the commit kept that date, a build with a
+# newer image did not. Every file and directory is dated
+# SOURCE_DATE_EPOCH first.
+#
+# The libraries. The checks above name the files the recipe knows of. A
+# new image can bring others no one asked for, loaded ahead of the
+# system's, as the OpenSSL of shout2 would have been: every file under
+# usr/lib of the AppDir, once the Wayland libraries are out, is compared
+# with linux/appimage-libs.txt, and one more or one less stops the
+# build (check_appimage_libs).
+rewrite_appimage() {
+    local appimage="$1" appdir lib plugin left name link best icon size preference hook registry
+    appdir="$(find "$(dirname "$appimage")" -mindepth 1 -maxdepth 1 -type d -name '*.AppDir')"
+    [ -n "$appdir" ] && [ "$(printf '%s\n' "$appdir" | wc -l)" -eq 1 ] || die "not one AppDir next to $appimage"
+    # What the scanner's <video> and a webcam need, among the plugins:
+    # the core elements, appsrc and appsink, autoaudiosink, playback and
+    # type finding, the video and audio converters, v4l2src and the JPEG
+    # decoder most webcams send through.
+    for plugin in coreelements app autodetect playback typefindfunctions videoconvert videoscale \
+            audioconvert audioresample volume video4linux2 jpeg; do
+        [ -f "$appdir/usr/lib/gstreamer-1.0/libgst$plugin.so" ] || die "no GStreamer plugin $plugin in the AppDir"
+    done
+    for plugin in $GSTREAMER_LEFT_OUT; do
+        [ ! -e "$appdir/usr/lib/gstreamer-1.0/libgst$plugin.so" ] || die "the GStreamer plugin $plugin is in the AppDir"
+    done
+    for lib in libssl.so.3 libcrypto.so.3 libdb-5.3.so; do
+        [ ! -e "$appdir/usr/lib/$lib" ] || die "$lib is in the AppDir"
+    done
+    [ -x "$appdir/usr/lib/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner" ] || die "no gst-plugin-scanner in the AppDir"
+    hook="$appdir/apprun-hooks/linuxdeploy-plugin-gstreamer.sh"
+    # shellcheck disable=SC2016  # the hook's own line, which AppRun expands
+    grep -qx 'export GST_PLUGIN_SYSTEM_PATH_1_0="${APPDIR}/usr/lib/gstreamer-1.0"' "$hook" 2> /dev/null \
+        || die "the AppRun hook does not point GStreamer at the AppDir's plugins"
+    registry="$(gstreamer_registry_line)"
+    ! grep -q 'GST_REGISTRY_1_0' "$hook" || die "the bundler's GStreamer hook already sets a registry"
+    printf '\n# A registry of the AppImage'"'"'s own, never the system'"'"'s.\n%s\n' "$registry" >> "$hook"
+    log "AppImage: GStreamer's registry is ${registry#*=}"
+    grep -qF 'apprun-hooks/"linuxdeploy-plugin-gstreamer.sh"' "$appdir/AppRun" \
+        || die "AppRun does not source the GStreamer hook"
+    log "AppImage: $(find "$appdir/usr/lib/gstreamer-1.0" -maxdepth 1 -name 'libgst*.so' | wc -l) GStreamer plugins and their scanner"
+    for lib in client cursor egl server; do
+        rm -f "$appdir/usr/lib/libwayland-$lib.so."*
+    done
+    # linuxdeploy 07333c6 also copies the copyright file of each package
+    # it took a library from: the files of libraries no longer shipped go.
+    rm -rf "$appdir"/usr/share/doc/libwayland-*
+    left="$(find "$appdir" -name 'libwayland-*')"
+    [ -z "$left" ] || die "a Wayland library is still in the AppDir: $left"
+    log "AppImage: libwayland-client, -cursor, -egl and -server left to the system"
+    check_appimage_libs "$appdir"
+    name="$(sed -n 's/^Icon=//p' "$appdir"/usr/share/applications/*.desktop)"
+    [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || die "no single Icon= key in the desktop entry of the AppDir"
+    link="$appdir/$name.png"
+    [ -L "$link" ] || die "linuxdeploy left no icon link at $link"
+    best="$(
+        for icon in "$appdir"/usr/share/icons/hicolor/*/apps/"$name".png; do
+            size="${icon#"$appdir"/usr/share/icons/hicolor/}"
+            size="${size%%x*}"
+            [[ "$size" =~ ^[0-9]+$ ]] || continue
+            if [ "$size" -lt 64 ]; then preference=$(( 100 * size / 65 )); else preference=$(( 6400 / size )); fi
+            printf '%s %s %s\n' "$preference" "$size" "${icon#"$appdir"/}"
+        done | LC_ALL=C sort -k1,1nr -k2,2nr -k3,3 | head -n 1 | cut -d' ' -f3
+    )"
+    [ -n "$best" ] || die "no $name.png under usr/share/icons/hicolor in the AppDir"
+    log "AppImage: the icon at the root of the AppDir is $best (linuxdeploy linked $(readlink "$link"))"
+    ln -sfn "$best" "$link"
+    find "$appdir" -exec touch --no-dereference --date="@$SOURCE_DATE_EPOCH" {} +
+    rm "$appimage"
+    (
+        cd "$APP" || exit 1
+        OUTPUT="$appimage" ARCH=x86_64 "$XDG_CACHE_HOME/tauri/linuxdeploy-plugin-appimage.AppImage" \
+            --appdir "$appdir" > "$WORK/appimage-plugin.log" 2>&1
+    ) || { cat "$WORK/appimage-plugin.log" >&2; die "linuxdeploy-plugin-appimage failed"; }
+    [ -f "$appimage" ] || die "linuxdeploy-plugin-appimage wrote no $appimage"
+}
+
+# The line the recipe adds to the GStreamer hook. The folder is the one
+# Tauri's app_cache_dir() gives, named after the identifier of
+# tauri.conf.json; the hook expands the variables, as GLib does for the
+# system's registry: XDG_CACHE_HOME, or ~/.cache without it.
+gstreamer_registry_line() {
+    local id
+    id="$(sed -n 's/^  "identifier": *"\(.*\)",$/\1/p' "$APP/src-tauri/tauri.conf.json")"
+    [[ "$id" =~ ^[A-Za-z0-9.-]+$ ]] || die "no single identifier in tauri.conf.json"
+    # shellcheck disable=SC2016  # expanded by the hook, at every start
+    printf 'export GST_REGISTRY_1_0="${XDG_CACHE_HOME:-${HOME}/.cache}/%s/gstreamer-1.0/registry.x86_64.bin"\n' "$id"
+}
+
+# Every file and link under usr/lib of the AppDir against the list
+# committed in linux/appimage-libs.txt, whose comment lines and blank
+# lines are left out. Any difference stops the build with the diff, and
+# with the list as it would be, header kept, in build-info: once every
+# line of the diff is understood, that file goes over the committed one
+# in a commit of its own.
+check_appimage_libs() {
+    local appdir="$1" list="$APP/reproducible/linux/appimage-libs.txt"
+    local want="$WORK/appimage-libs.want" have="$WORK/appimage-libs.have"
+    [ -f "$list" ] || die "no $list"
+    { grep -v -e '^#' -e '^$' "$list" || true; } > "$want"
+    (cd "$appdir/usr/lib" && find . -mindepth 1 \( -type f -o -type l \) -printf '%P\n') | LC_ALL=C sort > "$have"
+    if ! diff -u --label committed --label AppDir "$want" "$have" > "$WORK/appimage-libs.diff"; then
+        cat "$WORK/appimage-libs.diff" >&2
+        {
+            awk '/^#/ || /^$/ { print; next } { exit }' "$list"
+            cat "$have"
+        } > "$OUT/build-info/appimage-libs.txt"
+        die "usr/lib of the AppDir differs from reproducible/linux/appimage-libs.txt (diff above: - only in the list, + only in the AppDir). A library the image brought can shadow the system's: find which package and which file pulls it in. Once every line is understood, copy build-info/appimage-libs.txt of the output over reproducible/linux/appimage-libs.txt and commit it."
+    fi
+    log "AppImage: the $(wc -l < "$have") files under usr/lib are those of linux/appimage-libs.txt"
+}
+
+# Nothing to rewrite. What is checked is that the file starts with the
+# pinned runtime and not with one fetched on the side. appimagetool
+# writes the MD5 of the payload into the runtime's .digest_md5 section,
+# so those 16 bytes, and only those, may differ from the pinned file.
+canonical_appimage() {
+    local from="$1" to="$2" size section first last
+    size="$(stat -c %s "$LDAI_RUNTIME_FILE")"
+    section="$(readelf --sections --wide "$LDAI_RUNTIME_FILE" \
+        | awk '{ for (i = 1; i < NF; i++) if ($i == ".digest_md5") print $(i + 3), $(i + 4) }')"
+    [ -n "$section" ] || die "the pinned runtime has no .digest_md5 section"
+    first=$(( 0x${section% *} + 1 ))
+    last=$(( first + 0x${section#* } - 1 ))
+    [ "$(stat -c %s "$from")" -gt "$size" ] || die "the AppImage is smaller than its runtime"
+    # cmp exits 1 as soon as one byte differs, and 16 always do.
+    { cmp --verbose --bytes="$size" "$from" "$LDAI_RUNTIME_FILE" || true; } \
+        | awk -v first="$first" -v last="$last" '$1 < first || $1 > last { bad = 1 } END { exit bad }' \
+        || die "the AppImage does not start with the pinned runtime"
+    cp "$from" "$to"
+    chmod 0755 "$to"
+}

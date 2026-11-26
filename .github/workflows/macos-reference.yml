@@ -1,0 +1,160 @@
+# Checks the macOS application built on Linux against the bundle Tauri's
+# own bundler makes on a Mac from the same commit. Tauri's macOS bundler
+# only runs on a Mac, so reproducible/targets/macos.sh lays the bundle
+# out itself (reproducible/macos/info-plist.py writes its Info.plist);
+# this compares the two: the same Info.plist byte for byte, the same
+# icon, layout, libraries and oldest macOS. Only text leaves the Mac: the
+# two Info.plist files, the two listings, the libraries each slice loads
+# and what it targets.
+#
+# Started by hand (Actions, macOS reference, Run workflow) whenever
+# @tauri-apps/cli changes version in package-lock.json. It builds the
+# application once in the container and once on a Mac, about half an
+# hour of a macOS runner.
+
+name: macOS reference
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apple-sdk:
+    uses: ./.github/workflows/apple-sdk.yml
+    secrets:
+      apple-sdk-cache-key: ${{ secrets.APPLE_SDK_CACHE_KEY }}
+
+  macos:
+    needs: apple-sdk
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/container-build.yml
+    with:
+      target: macos
+      apple-sdk-key: ${{ needs.apple-sdk.outputs.key }}
+    secrets:
+      apple-sdk-cache-key: ${{ secrets.APPLE_SDK_CACHE_KEY }}
+
+  reference:
+    needs: macos
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: gerfaut-desktop
+          persist-credentials: false
+
+      - name: Read the pinned gerfaut-core revision
+        id: core
+        run: echo "rev=$(cat gerfaut-desktop/.github/gerfaut-core.rev)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: gerfaut-dev/gerfaut-core
+          ref: ${{ steps.core.outputs.rev }}
+          path: gerfaut-core
+          persist-credentials: false
+
+      - name: Install the pinned Rust toolchain
+        working-directory: gerfaut-desktop
+        run: |
+          rustup toolchain install
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          rustc --version
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.19.0
+
+      # With the inputs of the build on Linux. The Xcode whose SDK the
+      # recipe links against, where the runner defaults to an older one.
+      # And no pkg-config: the runner's Homebrew has an xz, and liblzma-sys
+      # would link the Apple silicon half against that copy, a library
+      # no user has, where the recipe builds liblzma into the program.
+      - name: Build with Tauri's bundler
+        working-directory: gerfaut-desktop
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_26.1.1.app/Contents/Developer
+          PKG_CONFIG: /usr/bin/false
+        run: |
+          xcrun --show-sdk-version
+          npm ci --ignore-scripts
+          npm run tauri -- build --ci --target universal-apple-darwin --bundles app -- --locked
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: build-macos
+          path: artefact
+
+      - name: Compare the two bundles
+        run: |
+          set -euo pipefail
+          native=gerfaut-desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/Gerfaut.app
+          ditto -x -k artefact/*_universal.zip cross
+          cross=cross/Gerfaut.app
+          mkdir reference
+          listing() { (cd "$1" && find . -print0 | LC_ALL=C sort -z | xargs -0 stat -f '%Sp %N'); }
+          failed=""
+          cp "$native/Contents/Info.plist" reference/native-Info.plist
+          cp "$cross/Contents/Info.plist" reference/cross-Info.plist
+          cmp reference/native-Info.plist reference/cross-Info.plist || failed="$failed Info.plist"
+          cmp "$native/Contents/Resources/icon.icns" "$cross/Contents/Resources/icon.icns" || failed="$failed icon"
+          listing "$native" > reference/native-listing.txt
+          listing "$cross" > reference/cross-listing.txt
+          # The one difference by design: Tauri signs nothing without an
+          # identity, the recipe signs ad hoc.
+          grep -v '/_CodeSignature' reference/cross-listing.txt > cross-unsigned.txt
+          cmp reference/native-listing.txt cross-unsigned.txt || failed="$failed listing"
+          grep -qx 'drwxr-xr-x ./Contents/_CodeSignature' reference/cross-listing.txt || failed="$failed signature"
+          grep -qx -- '-rw-r--r-- ./Contents/_CodeSignature/CodeResources' reference/cross-listing.txt || failed="$failed signature"
+          # Each half against its native twin: the same libraries, the
+          # same oldest macOS, the same SDK. The libraries are compared as
+          # sets, since the two linkers list them in their own order. The
+          # rest is only printed: each linker names itself and its version
+          # in LC_BUILD_VERSION, Apple's writes an LC_SOURCE_VERSION of 0
+          # that lld leaves out, and Tauri leaves the Intel half unsigned
+          # where the recipe signs both.
+          for arch in arm64 x86_64; do
+            for side in native cross; do
+              if [ "$side" = native ]; then app="$native"; else app="$cross"; fi
+              binary="$app/Contents/MacOS/gerfaut-desktop"
+              otool -arch "$arch" -L "$binary" | tail -n +2 | LC_ALL=C sort > "reference/$side-$arch-libraries.txt"
+              otool -arch "$arch" -l "$binary" > "$side-$arch-commands.txt"
+              awk '$1 == "cmd" { cmd = $2; if (cmd ~ /^LC_(BUILD_VERSION|VERSION_MIN_MACOSX)$/) print $1, $2 }
+                cmd == "LC_BUILD_VERSION" && $1 ~ /^(minos|sdk)$/ { print $1, $2 }
+                cmd == "LC_VERSION_MIN_MACOSX" && $1 ~ /^(version|sdk)$/ { print $1, $2 }' \
+                "$side-$arch-commands.txt" > "reference/$side-$arch-build-version.txt"
+              awk '$1 == "cmd" { print $2 }' "$side-$arch-commands.txt" | LC_ALL=C sort | uniq -c \
+                > "reference/$side-$arch-load-commands.txt"
+            done
+            cmp "reference/native-$arch-libraries.txt" "reference/cross-$arch-libraries.txt" || failed="$failed $arch-libraries"
+            cmp "reference/native-$arch-build-version.txt" "reference/cross-$arch-build-version.txt" || failed="$failed $arch-build-version"
+            diff "reference/native-$arch-load-commands.txt" "reference/cross-$arch-load-commands.txt" || true
+          done
+          # The Intel half targets the macOS Info.plist declares. Apple
+          # silicon starts at 11.0, whatever the plist says.
+          minimum="$(plutil -extract LSMinimumSystemVersion raw "$cross/Contents/Info.plist")"
+          grep -qx "version $minimum" reference/cross-x86_64-build-version.txt || failed="$failed x86_64-minimum"
+          grep -qx "minos 11.0" reference/cross-arm64-build-version.txt || failed="$failed arm64-minimum"
+          # What Tauri's bundler writes when told to sign ad hoc, beside
+          # what rcodesign wrote, and what Apple's checks make of each.
+          codesign --force --sign - --options runtime "$native"
+          codesign -dv --verbose=4 "$native" > reference/native-adhoc-signature.txt 2>&1
+          codesign -dv --verbose=4 "$cross" > reference/cross-signature.txt 2>&1
+          syspolicy_check distribution "$native" > reference/native-syspolicy.txt 2>&1 || true
+          syspolicy_check distribution "$cross" > reference/cross-syspolicy.txt 2>&1 || true
+          for file in reference/*; do echo "== $file"; cat "$file"; echo; done
+          [ -z "$failed" ] || { echo "the bundles differ:$failed"; exit 1; }
+          echo "same Info.plist, icon, layout, libraries and targets"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: macos-reference
+          if-no-files-found: warn
+          path: reference/
+          retention-days: 7

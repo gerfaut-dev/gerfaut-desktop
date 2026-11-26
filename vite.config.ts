@@ -1,0 +1,37 @@
+import { fileURLToPath } from "node:url";
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+
+// Tauri expects a fixed dev server address.
+export default defineConfig(({ mode }) => ({
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    // The import path the shadcn/ui components are written against.
+    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+  },
+  clearScreen: false,
+  server: {
+    port: 1420,
+    strictPort: true,
+    // The Rust build writes into src-tauri/target while vite runs.
+    watch: { ignored: ["**/src-tauri/**"] },
+    // The tests read the reference JSON of the gerfaut-core checkout
+    // beside this one (src/test/core.ts); the app serves nothing from
+    // outside this folder.
+    fs: mode === "test" ? { allow: [".", "../gerfaut-core/tests/bridge"] } : undefined,
+  },
+  envPrefix: ["VITE_", "TAURI_ENV_"],
+  build: {
+    target: "chrome110",
+    sourcemap: false,
+  },
+  test: {
+    environment: "jsdom",
+    setupFiles: ["./src/test/setup.ts"],
+    globals: true,
+    // The stylesheet the window rests on is read by its own test;
+    // every other stylesheet stays out of the tests.
+    css: { include: [/src\/styles\/tokens\.css/] },
+  },
+}));

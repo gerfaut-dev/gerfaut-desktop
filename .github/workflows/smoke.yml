@@ -1,0 +1,348 @@
+# The AppImage, the Windows installer or the macOS application built on
+# Linux, on the system it is for. A matching hash says nothing about
+# whether the program starts: this installs or unpacks it, checks what
+# the system makes of it, and starts it. It compiles nothing.
+#
+# Called by release.yml with the build of the target, the files a
+# release ships.
+
+name: Smoke test
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: linux, windows or macos
+        type: string
+        required: true
+      artifact:
+        description: The artifact that holds the file and its SHA256SUMS
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Started under Xvfb the way a user starts it: the AppImage itself,
+  # mounted through FUSE, on a system without libfuse2. What it looks
+  # for is a window that stays one flat colour. WebKit draws nothing
+  # when it cannot create its EGL display, which is what a newer Mesa
+  # did with the Wayland libraries the AppImage once carried
+  # (rewrite_appimage in reproducible/targets/linux.sh): Ubuntu 26.04 has
+  # that Mesa, 24.04 is the LTS before it.
+  linux:
+    if: inputs.target == 'linux'
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-26.04]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.artifact }}
+          path: artefact
+
+      - name: Check that the file is the one the Linux job built
+        run: |
+          set -euo pipefail
+          appimages=(artefact/*_amd64.AppImage)
+          [ "${#appimages[@]}" -eq 1 ] && [[ "$(basename "${appimages[0]}")" =~ ^[A-Za-z0-9._-]+$ ]] \
+            || { echo "expected one AppImage with a plain name"; exit 1; }
+          appimage="${appimages[0]}"
+          want="$(awk -v n="$(basename "$appimage")" '$2 == n { print $1 }' artefact/SHA256SUMS)"
+          have="$(sha256sum "$appimage" | cut -d' ' -f1)"
+          echo "$have  $(basename "$appimage")"
+          [ "$have" = "$want" ]
+          # An artifact does not keep the executable bit.
+          chmod +x "$appimage"
+          echo "APPIMAGE=$PWD/$appimage" >> "$GITHUB_ENV"
+
+      # The AppImage runtime must be the static one of
+      # AppImage/type2-runtime: it needs only a setuid fusermount
+      # (fusermount3 of fuse3) and /dev/fuse. The older dynamic runtime
+      # also needs libfuse.so.2, which Ubuntu 22.04 and newer no longer
+      # install by default, and fails without it with "Cannot mount
+      # AppImage, please check your FUSE setup.".
+      - name: Check that the AppImage runtime is static
+        run: |
+          set -euo pipefail
+          headers="$(readelf -dl "$APPIMAGE" 2>&1)"
+          if grep -E 'NEEDED|Requesting program interpreter' <<< "$headers"; then
+            echo "::error::the AppImage runtime links dynamically and needs libfuse2"
+            exit 1
+          fi
+          echo "static runtime: no interpreter, no shared library"
+
+      # What a desktop has and the AppImage leaves to the system: an X
+      # server, a session bus, FUSE to mount the image, and the
+      # libraries its excludelist keeps out, Mesa's EGL, GL and software
+      # renderer first. libgles2 comes with GTK 4 and WebKitGTK on any
+      # desktop; a bare runner lacks it and the webview aborts.
+      # libfuse2 goes first, so that the application starts the way it
+      # does on a desktop that never had it.
+      - name: Install what a desktop provides
+        run: |
+          # shellcheck disable=SC2046
+          sudo apt-get purge -y $(dpkg-query -W -f '${Package}\n' 'libfuse2*' 2> /dev/null || true)
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb x11-apps x11-utils dbus-daemon fuse3 fonts-dejavu-core \
+            libegl1 libegl-mesa0 libgl1 libgles2 libglx-mesa0 libgl1-mesa-dri libgbm1 libdrm2 \
+            libwayland-client0 libwayland-cursor0 libwayland-egl1 libwayland-server0 \
+            libx11-6 libx11-xcb1 libxcb1 libfontconfig1 libfreetype6 libfribidi0 libharfbuzz0b
+          dpkg-query -W -f '${Package} ${Version}\n' libegl-mesa0 libwayland-client0
+          if dpkg -l 'libfuse2*' 2> /dev/null | grep '^ii'; then echo "::error::libfuse2 is still installed"; exit 1; fi
+
+      # On a session bus of its own, as from a desktop session. No
+      # Secret Service answers on it, so the application opens on the
+      # page that says the vault could not be opened: a page the webview
+      # draws all the same. The window is read every second until it
+      # shows more than a flat colour.
+      - name: Start the application
+        run: |
+          set -euo pipefail
+          mkdir -p shots
+          cat > "$RUNNER_TEMP/window.py" <<'EOF'
+          # An xwd dump of a window on stdin: writes it as the PNG named
+          # on the command line and prints how many colours it shows.
+          import struct, sys, zlib
+          from array import array
+          data = sys.stdin.buffer.read()
+          h = struct.unpack(">25I", data[:100])
+          size, width, height, order, bpp, line, ncolours = h[0], h[4], h[5], h[7], h[11], h[12], h[19]
+          if (h[2], bpp, h[14:17], order) != (2, 32, (0xFF0000, 0xFF00, 0xFF), 0):
+              sys.exit(f"unexpected xwd format: {h}")
+          start = size + 12 * ncolours
+          if len(data) < start + line * height:
+              sys.exit("short xwd dump")
+          rows = [data[start + y * line : start + y * line + 4 * width] for y in range(height)]
+          raw = bytearray()
+          for row in rows:
+              rgb = bytearray(3 * width)
+              rgb[0::3], rgb[1::3], rgb[2::3] = row[2::4], row[1::4], row[0::4]
+              raw += b"\0" + rgb
+          def chunk(kind, body):
+              return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+          with open(sys.argv[1], "wb") as png:
+              png.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+                        + chunk(b"IDAT", zlib.compress(bytes(raw))) + chunk(b"IEND", b""))
+          print(len({pixel & 0xFFFFFF for pixel in array("I", b"".join(rows))}))
+          EOF
+          export DISPLAY=:99 DBUS_SESSION_BUS_ADDRESS="unix:path=$RUNNER_TEMP/bus"
+          Xvfb "$DISPLAY" -screen 0 1440x900x24 -nolisten tcp > shots/xvfb.log 2>&1 &
+          dbus-daemon --session --nofork --nopidfile --address "$DBUS_SESSION_BUS_ADDRESS" > shots/dbus.log 2>&1 &
+          for _ in $(seq 50); do
+            [ -S "/tmp/.X11-unix/X${DISPLAY#:}" ] && [ -S "$RUNNER_TEMP/bus" ] && break
+            sleep 0.2
+          done
+          [ -S "/tmp/.X11-unix/X${DISPLAY#:}" ] && [ -S "$RUNNER_TEMP/bus" ] \
+            || { cat shots/xvfb.log shots/dbus.log; echo "::error::Xvfb or the session bus did not start"; exit 1; }
+          xdpyinfo > /dev/null
+          "$APPIMAGE" > shots/app.log 2>&1 &
+          app=$!
+          colours=
+          for second in $(seq 90); do
+            sleep 1
+            kill -0 "$app" 2> /dev/null || { cat shots/app.log; echo "::error::the application exited"; exit 1; }
+            info="$(xwininfo -name Gerfaut 2> /dev/null)" || continue
+            grep -q 'Map State: IsViewable' <<< "$info" || continue
+            xwd -silent -id "$(awk '/Window id:/ { print $4 }' <<< "$info")" > "$RUNNER_TEMP/window.xwd" || continue
+            colours="$(python3 "$RUNNER_TEMP/window.py" shots/window.png < "$RUNNER_TEMP/window.xwd")"
+            # A drawn page, its text and logo, gives hundreds; a white
+            # window gives one.
+            if [ "$colours" -ge 16 ]; then
+              echo "after $second s the window shows $colours colours"
+              kill "$app"
+              cat shots/app.log
+              exit 0
+            fi
+          done
+          cat shots/app.log
+          if [ -z "$colours" ]; then
+            echo "::error::no Gerfaut window after 90 seconds"
+          else
+            echo "::error::the window still shows $colours colour(s) after 90 seconds"
+          fi
+          exit 1
+
+      # What the window showed, and what the application printed.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: smoke-linux-${{ matrix.runner }}
+          if-no-files-found: ignore
+          path: shots/
+          retention-days: 7
+
+  # Installed, started and removed on Windows.
+  windows:
+    if: inputs.target == 'windows'
+    runs-on: windows-2025
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.artifact }}
+          path: artefact
+
+      - name: Check that the file is the one the Linux job built
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = Get-ChildItem artefact/Gerfaut_*_x64-setup.exe
+          $line = Get-Content artefact/SHA256SUMS | Where-Object { $_ -like "*$($setup.Name)" }
+          $want = ($line -split '\s+')[0]
+          $have = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
+          "$have  $($setup.Name)"
+          if ($have -ne $want) { throw "the hash differs from the one in SHA256SUMS ($want)" }
+          # Unsigned today. The day this changes, this check and the
+          # release notes about SmartScreen change with it.
+          $signature = (Get-AuthenticodeSignature $setup).Status
+          if ($signature -ne 'NotSigned') { throw "unexpected Authenticode status: $signature" }
+          "SETUP=$($setup.FullName)" >> $env:GITHUB_ENV
+
+      - name: Install silently
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $done = Start-Process $env:SETUP -ArgumentList '/S' -Wait -PassThru
+          if ($done.ExitCode -ne 0) { throw "the installer exited with $($done.ExitCode)" }
+          $app = Join-Path $env:LOCALAPPDATA 'Gerfaut\gerfaut-desktop.exe'
+          if (-not (Test-Path $app)) { throw "not installed: $app" }
+          $info = (Get-Item $app).VersionInfo
+          $info | Format-List ProductName, FileDescription, FileVersion, ProductVersion, LegalCopyright
+          $version = $env:SETUP -replace '.*Gerfaut_(.+)_x64-setup\.exe$', '$1'
+          if ($info.ProductName -ne 'Gerfaut') { throw "product name: $($info.ProductName)" }
+          if ($info.ProductVersion -ne $version) { throw "product version: $($info.ProductVersion), expected $version" }
+          $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Gerfaut'
+          if ((Get-ItemProperty $key).DisplayVersion -ne $version) { throw 'the uninstall entry does not carry the version' }
+          if (-not (Test-Path (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Gerfaut.lnk'))) { throw 'no Start Menu entry' }
+
+      - name: Start the application
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = Join-Path $env:LOCALAPPDATA 'Gerfaut\gerfaut-desktop.exe'
+          $process = Start-Process $app -PassThru
+          Start-Sleep -Seconds 10
+          if ($process.HasExited) { throw "the application exited with $($process.ExitCode)" }
+          # The window is a WebView2: no child process means no window.
+          $children = Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" |
+            Where-Object { $_.CommandLine -like '*gerfaut*' }
+          "WebView2 processes: $(@($children).Count)"
+          if (-not $children) { throw 'the application started no WebView2 process' }
+          Stop-Process -Id $process.Id -Force
+          Wait-Process -Id $process.Id -Timeout 30 -ErrorAction SilentlyContinue
+
+      - name: Uninstall silently
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:LOCALAPPDATA 'Gerfaut'
+          # The uninstaller copies itself to a temporary directory and
+          # returns at once, so the result is waited for, not the process.
+          Start-Process (Join-Path $dir 'uninstall.exe') -ArgumentList '/S' -Wait
+          $left = @(
+            $dir,
+            'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Gerfaut',
+            (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Gerfaut.lnk'),
+            (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Gerfaut.lnk')
+          )
+          foreach ($attempt in 1..30) {
+            if (-not ($left | Where-Object { Test-Path $_ })) { break }
+            Start-Sleep -Seconds 2
+          }
+          $still = $left | Where-Object { Test-Path $_ }
+          if ($still) { throw "left behind: $($still -join ', ')" }
+          'nothing left behind'
+
+  # On a Mac of each kind: unpacked as Finder does, its signature
+  # checked, started, and assessed the way Gatekeeper assesses a
+  # downloaded copy.
+  macos:
+    if: inputs.target == 'macos'
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.artifact }}
+          path: artefact
+
+      - name: Check that the file is the one the Linux job built
+        run: |
+          set -euo pipefail
+          sw_vers
+          echo "processor: $(uname -m)"
+          zips=(artefact/*_universal.zip)
+          [ "${#zips[@]}" -eq 1 ] && [[ "$(basename "${zips[0]}")" =~ ^[A-Za-z0-9._-]+$ ]] \
+            || { echo "expected one zip with a plain name"; exit 1; }
+          zip="${zips[0]}"
+          want="$(awk -v n="$(basename "$zip")" '$2 == n { print $1 }' artefact/SHA256SUMS)"
+          have="$(shasum -a 256 "$zip" | cut -d' ' -f1)"
+          echo "$have  $(basename "$zip")"
+          [ "$have" = "$want" ]
+          echo "ZIP=$PWD/$zip" >> "$GITHUB_ENV"
+
+      # Archive Utility, which Finder opens a zip with, unpacks the way
+      # ditto does.
+      - name: Unpack as Finder does
+        run: |
+          set -euo pipefail
+          ditto -x -k "$ZIP" unpacked
+          find unpacked -print0 | xargs -0 stat -f '%Sp %z %N'
+          echo "APP=$PWD/unpacked/Gerfaut.app" >> "$GITHUB_ENV"
+
+      - name: Check the signature
+        run: |
+          set -euo pipefail
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv --verbose=4 "$APP" > signature.txt 2>&1
+          cat signature.txt
+          grep -q '^Identifier=com.gerfautwallet.gerfaut$' signature.txt
+          grep -q '^Signature=adhoc$' signature.txt
+          grep -Eq 'flags=0x10002\(adhoc,runtime\)' signature.txt
+          grep -q '^Sealed Resources version=2 ' signature.txt
+          archs="$(lipo -archs "$APP/Contents/MacOS/gerfaut-desktop")"
+          echo "lipo -archs: $archs"
+          [ "$archs" = "x86_64 arm64" ]
+
+      # No quarantine attribute here, so Gatekeeper stays out of it. The
+      # runner's login keychain is unlocked, and the application creates
+      # its vault in the runner's home.
+      - name: Start the application
+        run: |
+          set -euo pipefail
+          open -n --stdout "$PWD/app.log" --stderr "$PWD/app.log" "$APP"
+          sleep 10
+          pid="$(pgrep -x gerfaut-desktop)" || { cat app.log; echo "the application is not running after 10 seconds"; exit 1; }
+          ps -o pid=,etime=,command= -p "$pid"
+          echo "web content processes: $(pgrep -f com.apple.WebKit.WebContent | wc -l | tr -d ' ')"
+          kill "$pid"
+          cat app.log
+
+      # A copy marked as downloaded by Safari: Gatekeeper must refuse it
+      # for the ordinary reason, no notarisation, and never call it
+      # damaged or broken.
+      - name: Assess a downloaded copy
+        run: |
+          set -euo pipefail
+          ditto "$APP" quarantined/Gerfaut.app
+          xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;" quarantined/Gerfaut.app
+          status=0
+          spctl --assess --type execute -vvv quarantined/Gerfaut.app > spctl.txt 2>&1 || status=$?
+          cat spctl.txt
+          echo "spctl exit status: $status"
+          syspolicy_check distribution quarantined/Gerfaut.app 2>&1 || true
+          [ "$status" -ne 0 ] || { echo "Gatekeeper accepted an application that is not notarised"; exit 1; }
+          grep -q 'rejected' spctl.txt
+          if grep -Eiq 'no resources|damaged|invalid|modified|not signed' spctl.txt; then
+            echo "Gatekeeper sees a broken signature"
+            exit 1
+          fi

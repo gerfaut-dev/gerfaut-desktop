@@ -1,0 +1,28 @@
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Local files
+*.local
+
+# Secrets: environment files and private keys never go in
+.env
+.env.*
+!.env.example
+*.pem
+
+# Dependencies and build output
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+tsconfig.tsbuildinfo
+
+# Container build output
+reproducible/out/

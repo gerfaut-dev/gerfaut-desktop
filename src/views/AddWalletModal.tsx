@@ -1,0 +1,611 @@
+import { FileUp, ScanLine } from "lucide-react";
+import { useId, useRef, useState } from "react";
+import { Button, Disclosure } from "../components/Button";
+import { InputError } from "../components/InputError";
+import { Modal } from "../components/Modal";
+import { Notice } from "../components/Notice";
+import { Select } from "../components/Select";
+import { ScanQrModal } from "../components/ScanQrModal";
+import type {
+  DerivationChoice,
+  InputWarning,
+  Network,
+  ParsedInput,
+  RecognizedKind,
+  ScriptKind,
+} from "../lib/ipc";
+import { openFilePicker } from "../lib/excursion";
+import { NETWORK_LABEL } from "../lib/format";
+import { ipc, materialRefusal } from "../lib/ipc";
+import { WALLET_FILE_ACCEPT, WALLET_FILE_HINT } from "../lib/walletFiles";
+import { useAddWallet, useSetActiveNetwork, useSyncWallet } from "../state/queries";
+import { useUi } from "../state/store";
+
+const KIND_LABEL: Record<RecognizedKind, string> = {
+  descriptor: "Output descriptor",
+  descriptor_pair: "Descriptor pair (receive + change)",
+  multipath_descriptor: "Multipath descriptor (BIP-389)",
+  extended_key: "Extended public key",
+  address: "Single address",
+  wallet_export: "Wallet export file",
+  bsms: "BSMS record",
+};
+
+const SCRIPT_LABEL: Record<ScriptKind, string> = {
+  legacy: "Legacy (P2PKH)",
+  nested_segwit: "Nested SegWit (P2SH-P2WPKH)",
+  segwit: "Native SegWit (P2WPKH)",
+  taproot: "Taproot (P2TR)",
+  witness_script: "Script (P2WSH)",
+  legacy_script: "Script (P2SH)",
+  bare: "Bare script",
+};
+
+const WARNING_LABEL: Record<InputWarning, string> = {
+  assumed_segwit: "This key carries no script type. Check the one selected below.",
+  slip132_converted: "The SLIP-132 prefix was converted to a standard extended key.",
+  change_not_tracked: "No change path was provided: change outputs will not be tracked.",
+  multiple_accounts_in_file: "The file holds several account types; the preferred one was selected.",
+  non_standard_derivation:
+    "The paths chosen are not the usual 0/* and 1/*: compare the first address with your wallet.",
+  assumed_branches:
+    "This QR code carries no receive or change path, so Gerfaut assumes the usual 0/* and 1/*. Compare the first address with your signer.",
+};
+
+/** How the addresses of each single-key script type start on each
+    network: the test networks share theirs, and regtest has its own
+    prefix for SegWit. */
+const ADDRESS_START: Record<
+  "legacy" | "nested_segwit" | "segwit" | "taproot",
+  Record<Network, string>
+> = {
+  legacy: { mainnet: "1", signet: "m or n", testnet4: "m or n", regtest: "m or n" },
+  nested_segwit: { mainnet: "3", signet: "2", testnet4: "2", regtest: "2" },
+  segwit: { mainnet: "bc1q", signet: "tb1q", testnet4: "tb1q", regtest: "bcrt1q" },
+  taproot: { mainnet: "bc1p", signet: "tb1p", testnet4: "tb1p", regtest: "bcrt1p" },
+};
+
+/** What each script type means to the person choosing, in one line,
+    with the start of the addresses it gives on the wallet's network:
+    what they compare with their own wallet. */
+export function scriptHint(script: ScriptKind, network: Network): string {
+  switch (script) {
+    case "legacy":
+      return `P2PKH, addresses starting with ${ADDRESS_START.legacy[network]}`;
+    case "nested_segwit":
+      return `P2SH-P2WPKH, addresses starting with ${ADDRESS_START.nested_segwit[network]}`;
+    case "segwit":
+      return `P2WPKH, addresses starting with ${ADDRESS_START.segwit[network]}`;
+    case "taproot":
+      return `P2TR, addresses starting with ${ADDRESS_START.taproot[network]}`;
+    case "witness_script":
+      return "P2WSH multisig or script";
+    case "legacy_script":
+      return "P2SH multisig or script";
+    case "bare":
+      return "Raw script";
+  }
+}
+
+/** The largest file read for a wallet: sixteen times what the core
+    takes as one. A bigger file is none, and reading it whole would
+    only stall the window. */
+export const MAX_WALLET_FILE_BYTES = 1024 * 1024;
+
+/** Two steps: paste or import, then confirm what was recognized.
+    Detection is never silent — the user validates before anything is
+    stored. */
+export function AddWalletModal({ activeNetwork }: { activeNetwork: Network }) {
+  const { addWalletOpen, setAddWalletOpen, openWallet, showToast } = useUi();
+  const [raw, setRaw] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [parsed, setParsed] = useState<ParsedInput | null>(null);
+  const [script, setScript] = useState<ScriptKind | null>(null);
+  const [name, setName] = useState("");
+  const [network, setNetwork] = useState<Network>(activeNetwork);
+  const [scanOpen, setScanOpen] = useState(false);
+  // The advanced disclosure, and what it holds. The fields survive a
+  // re-parse: whoever tried one branch tries the next from there.
+  const [advanced, setAdvanced] = useState(false);
+  const [receive, setReceive] = useState("0/*");
+  const [change, setChange] = useState("1/*");
+  const [origin, setOrigin] = useState("");
+  const [derivationError, setDerivationError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const fileHintId = useId();
+  /** What the core assumed reading the last code scanned, which the
+      text it gave no longer shows: said with that text's own warnings
+      for as long as the field holds it. */
+  const scanned = useRef<{ text: string; warnings: InputWarning[] } | null>(null);
+  const addWallet = useAddWallet();
+  const sync = useSyncWallet();
+  const setActiveNetwork = useSetActiveNetwork();
+
+  const reset = () => {
+    dropPending();
+    scanned.current = null;
+    setRaw("");
+    setError(null);
+    setParsed(null);
+    setScript(null);
+    setName("");
+    addWallet.reset();
+  };
+  /** Back to the field, with what was pasted still in it: whoever goes
+      back does so to correct it, not to type it again. */
+  const back = () => {
+    dropPending();
+    setError(null);
+    setParsed(null);
+    setScript(null);
+    addWallet.reset();
+  };
+  const close = () => {
+    setAddWalletOpen(false);
+    reset();
+  };
+
+  /** What the derivation fields amount to, in the core's shape. */
+  const derivation = (): DerivationChoice => ({
+    receive: receive.trim(),
+    change: change.trim() || null,
+    origin: origin.trim() || null,
+  });
+
+  /** Fills the fields with the paths the core says are in effect, so
+      opening the disclosure shows what is actually used. */
+  const seedDerivation = (result: ParsedInput) => {
+    if (!result.derivation) return;
+    setReceive(result.derivation.receive);
+    setChange(result.derivation.change ?? "");
+    setOrigin(result.derivation.origin ?? "");
+  };
+
+  /** What the last parse that went through was asked, so a network
+      picked afterwards rebuilds that same wallet on it. */
+  const asked = useRef<{ chosen?: ScriptKind; paths?: DerivationChoice }>({});
+  /** The last parse asked for: an answer to an earlier one, landing
+      after it, is stale, and would put back a network or a first
+      address the person has already moved away from. */
+  const latest = useRef(0);
+  /** The network of the first address on screen, which a refused pick
+      goes back to. */
+  const shownOn = useRef<Network>(activeNetwork);
+  /** A parse is out: the address on screen may not be the network's. */
+  const [parsing, setParsing] = useState(false);
+  /** An answer still on its way is for an input left behind. */
+  const dropPending = () => {
+    latest.current += 1;
+    setParsing(false);
+  };
+
+  /** `on` is the network picked; without one this is a new input, and
+      it starts on the network on screen when the input allows it. The
+      core derives the first address for the same network. */
+  const parse = async (
+    input: string,
+    chosen?: ScriptKind,
+    paths?: DerivationChoice,
+    on?: Network,
+  ) => {
+    const ticket = ++latest.current;
+    setError(null);
+    setParsing(true);
+    try {
+      const parsedInput = await ipc.parseInput(input, chosen, paths, on ?? activeNetwork);
+      if (ticket !== latest.current) return;
+      setParsing(false);
+      const assumed = scanned.current?.text === input ? scanned.current.warnings : [];
+      const result = {
+        ...parsedInput,
+        warnings: [
+          ...parsedInput.warnings,
+          ...assumed.filter((warning) => !parsedInput.warnings.includes(warning)),
+        ],
+      };
+      setParsed(result);
+      seedDerivation(result);
+      setDerivationError(null);
+      asked.current = { chosen, paths };
+      const shown =
+        on ?? (result.networks.includes(activeNetwork) ? activeNetwork : result.networks[0]);
+      shownOn.current = shown;
+      setNetwork(shown);
+    } catch (err) {
+      if (ticket !== latest.current) return;
+      setParsing(false);
+      // The address on screen is still the one of the network before.
+      setNetwork(shownOn.current);
+      const message = materialRefusal(err);
+      // A refused path belongs under the fields that caused it; the
+      // card above keeps the parse that did work.
+      if (paths) setDerivationError(message);
+      else setError(message);
+    }
+  };
+
+  /** The script type is rebuilt by the core, never patched locally:
+      the descriptors and the preview address must come from one place.
+      The derivation goes along, or picking a script would undo it. */
+  const chooseScript = (chosen: ScriptKind) => {
+    setScript(chosen);
+    void parse(raw, chosen, advanced ? derivation() : undefined, network);
+  };
+
+  /** The first address belongs to a network: picking another one asks
+      the core for it again, on the wallet as it stands. A regtest
+      wallet shown a signet address would be compared with the wrong
+      one: until the answer, nothing is added, and a network the core
+      refuses goes back to the one the address belongs to. */
+  const chooseNetwork = (next: Network) => {
+    setNetwork(next);
+    void parse(raw, asked.current.chosen, asked.current.paths, next);
+  };
+
+  const importFile = async (file: File) => {
+    if (file.size > MAX_WALLET_FILE_BYTES) {
+      setError("This file is too large to hold a wallet.");
+      return;
+    }
+    const text = await file.text();
+    setRaw(text.trim());
+    await parse(text);
+  };
+
+  const submit = async () => {
+    if (!parsed || parsing || name.trim().length === 0) return;
+    let meta;
+    try {
+      meta = await addWallet.mutateAsync({ name, parsed, network });
+    } catch (err) {
+      setError(materialRefusal(err));
+      return;
+    }
+    // The wallet is in from here on: whatever follows, the dialog
+    // closes, or a second click would only hear "already watched".
+    // The workspace follows it to its network, otherwise it would land
+    // out of sight; when that move fails, the toast says where it is.
+    let shown = true;
+    if (network !== activeNetwork) {
+      shown = await setActiveNetwork.mutateAsync(network).then(
+        () => true,
+        () => false,
+      );
+    }
+    showToast(shown ? "Wallet added" : `Wallet added on ${NETWORK_LABEL[network]}`);
+    close();
+    openWallet(meta.id);
+    sync.mutate(meta.id);
+  };
+
+  return (
+    <Modal open={addWalletOpen} onClose={close} title="Add a wallet" width={560}>
+      {parsed === null ? (
+        <div className="flex flex-col gap-4">
+          <div>
+            <label
+              htmlFor="wallet-input"
+              className="mb-1 block font-ui text-xs font-medium uppercase tracking-[0.04em] text-muted"
+            >
+              Descriptor, extended public key, or address
+            </label>
+            <textarea
+              id="wallet-input"
+              value={raw}
+              onChange={(event) => setRaw(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                  event.preventDefault();
+                  if (raw.trim().length > 0) void parse(raw);
+                }
+              }}
+              rows={5}
+              spellCheck={false}
+              autoComplete="off"
+              aria-invalid={error !== null}
+              placeholder="wpkh([fingerprint/84h/0h/0h]xpub.../0/*)"
+              className="field-focus selectable w-full resize-none rounded-sm border border-transparent bg-sunken p-3 font-data text-[13px] leading-relaxed text-text"
+            />
+            {error && <InputError className="mt-2">{error}</InputError>}
+            <p className="mt-2 font-ui text-xs text-muted">
+              Gerfaut is watch-only: anything containing a private key or a seed
+              phrase is refused and never stored.
+            </p>
+          </div>
+          <div>
+            <div className="flex items-center justify-between">
+              {/* Two other ways in, side by side: equal choices, so
+                  neither takes the blue Continue holds. */}
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={() => openFilePicker(fileRef.current)}
+                  icon={FileUp}
+                  aria-describedby={fileHintId}
+                >
+                  Import a file
+                </Button>
+                <Button variant="secondary" onClick={() => setScanOpen(true)} icon={ScanLine}>
+                  Scan a QR code
+                </Button>
+              </div>
+              <input
+                ref={fileRef}
+                type="file"
+                accept={WALLET_FILE_ACCEPT}
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void importFile(file);
+                  event.target.value = "";
+                }}
+              />
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={close}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  disabled={raw.trim().length === 0}
+                  onClick={() => void parse(raw)}
+                >
+                  Continue
+                </Button>
+              </div>
+            </div>
+            {/* Said before the picker opens, in sight: a hover tooltip
+                would hide it from a keyboard and a finger. */}
+            <p id={fileHintId} className="mt-2 font-ui text-xs text-muted">
+              {WALLET_FILE_HINT}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <div className="rounded-lg border border-border bg-background p-4">
+            <p className="font-ui text-sm text-text">
+              Recognized as <strong className="font-medium">{KIND_LABEL[parsed.kind]}</strong>
+              {parsed.payload.type === "descriptors" && (
+                <> · {SCRIPT_LABEL[parsed.payload.script]}</>
+              )}
+            </p>
+            {/* Balanced: a 62-character Taproot address is a hair wider
+                than the card, and left to itself it put one character on
+                a line of its own. */}
+            {parsed.payload.type === "address" && (
+              <p className="selectable mt-1 break-all text-balance font-data text-[13px] text-muted">
+                {parsed.payload.address}
+              </p>
+            )}
+            {parsed.preview_address && (
+              <p className="mt-2 flex flex-wrap items-baseline gap-x-2 font-ui text-xs text-muted">
+                <span>First address</span>
+                <span
+                  data-testid="preview-address"
+                  className="selectable break-all text-balance font-data text-[13px] text-text"
+                >
+                  {parsed.preview_address}
+                </span>
+              </p>
+            )}
+          </div>
+
+          {/* What the core did not know sits outside the card that says
+              what it recognized, so the two do not read as one block of
+              facts. Nothing here risks funds or privacy: amber. */}
+          {parsed.warnings.length > 0 && (
+            <ul aria-label="Cautions" className="flex flex-col gap-2">
+              {parsed.warnings.map((warning) => (
+                <li key={warning}>
+                  <Notice tone="info">{WARNING_LABEL[warning]}</Notice>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {parsed.script_options.length > 0 && parsed.payload.type === "descriptors" && (
+            <div>
+              <label
+                htmlFor="wallet-script"
+                className="mb-1 block font-ui text-xs font-medium uppercase tracking-[0.04em] text-muted"
+              >
+                Script type
+              </label>
+              <Select
+                id="wallet-script"
+                label="Script type"
+                value={script ?? parsed.payload.script}
+                onChange={chooseScript}
+                options={parsed.script_options.map((option) => ({
+                  value: option,
+                  label: SCRIPT_LABEL[option],
+                  hint: scriptHint(option, network),
+                }))}
+              />
+              <p className="mt-1.5 font-ui text-xs text-muted">
+                Compare the first address above with your wallet.
+              </p>
+            </div>
+          )}
+
+          {/* Only a lone extended key leaves the branches open;
+              everything else carries its own and the core ignores a
+              choice made here. */}
+          {parsed.derivation_editable && parsed.payload.type === "descriptors" && (
+            <div>
+              <Disclosure open={advanced} className="-ml-2" onClick={() => setAdvanced(!advanced)}>
+                Advanced
+              </Disclosure>
+              {advanced && (
+                <div className="mt-2 flex flex-col gap-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <PathField
+                      id="derivation-receive"
+                      label="Receive path"
+                      value={receive}
+                      placeholder="0/*"
+                      onChange={setReceive}
+                    />
+                    <PathField
+                      id="derivation-change"
+                      label="Change path"
+                      value={change}
+                      placeholder="Leave empty to not track change"
+                      onChange={setChange}
+                    />
+                  </div>
+                  <PathField
+                    id="derivation-origin"
+                    label="Key origin"
+                    value={origin}
+                    placeholder="[deadbeef/84'/0'/0']"
+                    onChange={setOrigin}
+                  />
+                  <p className="font-ui text-xs text-muted">
+                    For a key used outside the usual branches. The first
+                    address above updates so you can check.
+                  </p>
+                  {derivationError && (
+                    <p className="font-ui text-xs text-muted">{derivationError}</p>
+                  )}
+                  <span>
+                    <Button
+                      variant="secondary"
+                      onClick={() =>
+                        void parse(raw, script ?? undefined, derivation(), network)
+                      }
+                    >
+                      Apply
+                    </Button>
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label
+                htmlFor="wallet-name"
+                className="mb-1 block font-ui text-xs font-medium uppercase tracking-[0.04em] text-muted"
+              >
+                Name
+              </label>
+              <input
+                id="wallet-name"
+                autoFocus
+                autoComplete="off"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void submit();
+                  }
+                }}
+                placeholder="Cold storage"
+                className="field-focus h-11 w-full rounded-sm border border-transparent bg-sunken px-3 font-ui text-base text-text"
+              />
+            </div>
+            {/* An input that fits one network leaves nothing to choose:
+                a menu of one option, greyed out, read as a control that
+                does nothing. The network is said plainly, as the backup
+                scope is. */}
+            {parsed.networks.length === 1 ? (
+              <div>
+                <p className="mb-1 block font-ui text-xs font-medium uppercase tracking-[0.04em] text-muted">
+                  Network
+                </p>
+                <p className="flex h-11 items-center font-ui text-base text-text">
+                  {NETWORK_LABEL[network]}
+                </p>
+              </div>
+            ) : (
+              <div>
+                <label
+                  htmlFor="wallet-network"
+                  className="mb-1 block font-ui text-xs font-medium uppercase tracking-[0.04em] text-muted"
+                >
+                  Network
+                </label>
+                <Select
+                  id="wallet-network"
+                  label="Network"
+                  align="end"
+                  className="w-40"
+                  value={network}
+                  onChange={chooseNetwork}
+                  options={parsed.networks.map((candidate) => ({
+                    value: candidate,
+                    label: NETWORK_LABEL[candidate],
+                  }))}
+                />
+              </div>
+            )}
+          </div>
+
+          {error && <InputError>{error}</InputError>}
+
+          <div className="flex justify-between">
+            <Button variant="secondary" onClick={back}>
+              Back
+            </Button>
+            <Button
+              variant="primary"
+              disabled={name.trim().length === 0 || parsing}
+              busy={addWallet.isPending}
+              onClick={() => void submit()}
+            >
+              {addWallet.isPending ? "Adding…" : "Add wallet"}
+            </Button>
+          </div>
+        </div>
+      )}
+      <ScanQrModal
+        open={scanOpen}
+        onClose={() => setScanOpen(false)}
+        onScan={(text, warnings) => {
+          scanned.current = { text, warnings };
+          setRaw(text);
+          void parse(text);
+        }}
+      />
+    </Modal>
+  );
+}
+
+/** One derivation field: an identifier, so it reads in the mono face. */
+function PathField({
+  id,
+  label,
+  value,
+  placeholder,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  placeholder: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div>
+      <label
+        htmlFor={id}
+        className="mb-1 block font-ui text-xs font-medium uppercase tracking-[0.04em] text-muted"
+      >
+        {label}
+      </label>
+      <input
+        id={id}
+        type="text"
+        spellCheck={false}
+        autoComplete="off"
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        className="field-focus h-11 w-full rounded-sm border border-transparent bg-sunken px-3 font-data text-[13px] text-text"
+      />
+    </div>
+  );
+}

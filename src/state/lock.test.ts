@@ -1,0 +1,182 @@
+import { mockIPC } from "@tauri-apps/api/mocks";
+import { beforeEach, describe, expect, it } from "vitest";
+import type { AppLock, Settings } from "../lib/ipc";
+import { coreCase } from "../test/core";
+import { PREFERENCES } from "../test/fixtures";
+import { isLockedError, lockedSettings, useLock } from "./lock";
+
+const PIN: AppLock = { kind: "pin", biometric: false };
+
+const FULL: Settings = {
+  active_network: "signet",
+  backends: { signet: { type: "custom_esplora", url: "https://mempool.space/signet/api" } },
+  app_prefs: {
+    "desktop.theme": "dark",
+    "onboarding.seen": "1",
+    "lock.delay": "60",
+    "desktop.sidebar": "collapsed",
+  },
+  electrum_certs: { "node.example:50002": "AB:CD" },
+  app_lock: PIN,
+  gap_limit: 50,
+  tor: { mode: "system", socks_proxy: "127.0.0.1:9150" },
+  preferences: { ...PREFERENCES, unit: "sats", masked: true, fiat: true },
+};
+
+describe("the settings kept behind the lock", () => {
+  it("keeps the theme and the kind of lock, and nothing of the vault", () => {
+    const shut = lockedSettings(FULL);
+    // What the lock screen and the first frame after it are drawn from.
+    // The Rust side keeps exactly these three as well.
+    expect(shut.app_prefs["desktop.theme"]).toBe(FULL.app_prefs["desktop.theme"]);
+    expect(shut.app_prefs["onboarding.seen"]).toBe(FULL.app_prefs["onboarding.seen"]);
+    // The delay before the lock comes back, or the first minutes after
+    // an unlock run on the default one.
+    expect(shut.app_prefs["lock.delay"]).toBe(FULL.app_prefs["lock.delay"]);
+    expect(shut.active_network).toBe(FULL.active_network);
+
+    expect(shut.app_prefs).toEqual({
+      "desktop.theme": "dark",
+      "onboarding.seen": "1",
+      "lock.delay": "60",
+    });
+    expect(shut.backends).toEqual({});
+    expect(shut.electrum_certs).toEqual({});
+    // What the lock screen has to ask for stays.
+    expect(shut.app_lock).toEqual(PIN);
+  });
+
+  it("answers the rest at the core's defaults, as the Rust side does", () => {
+    const shut = lockedSettings(FULL);
+    expect(shut.preferences).toEqual(PREFERENCES);
+    expect(shut).toEqual({
+      ...coreCase<Settings>("Settings", "fresh"),
+      active_network: FULL.active_network,
+      app_lock: PIN,
+      app_prefs: { "desktop.theme": "dark", "onboarding.seen": "1", "lock.delay": "60" },
+    });
+    // A copy, never the defaults themselves.
+    shut.preferences.masked = true;
+    expect(lockedSettings(FULL).preferences).toEqual(PREFERENCES);
+  });
+
+  it("reads a refusal from the locked vault for what it is", () => {
+    expect(isLockedError({ kind: "locked", message: "Gerfaut is locked." })).toBe(true);
+    expect(isLockedError({ kind: "vault", message: "no" })).toBe(false);
+    expect(isLockedError(new Error("no"))).toBe(false);
+    expect(isLockedError(undefined)).toBe(false);
+  });
+});
+
+describe("the app lock", () => {
+  beforeEach(() => {
+    useLock.setState({ lock: null, locked: false, seen: false });
+  });
+
+  it("takes the lock from the vault, and only the first read locks", () => {
+    useLock.getState().syncFromSettings(PIN);
+    expect(useLock.getState().locked).toBe(true);
+
+    // Unlocking, then a settings refetch: the app must stay open.
+    useLock.setState({ locked: false });
+    useLock.getState().syncFromSettings(PIN);
+    expect(useLock.getState().locked).toBe(false);
+  });
+
+  it("a vault with no lock never locks", () => {
+    useLock.getState().syncFromSettings(null);
+    expect(useLock.getState().locked).toBe(false);
+    useLock.getState().lockNow();
+    expect(useLock.getState().locked).toBe(false);
+  });
+
+  it("stays unlocked until it is asked to lock again", async () => {
+    mockIPC((cmd) => {
+      if (cmd === "verify_app_lock") {
+        return { unlocked: true, failures: 0, retry_after_secs: 0 };
+      }
+      throw new Error(`unexpected command ${cmd}`);
+    });
+    useLock.getState().syncFromSettings(PIN);
+
+    await useLock.getState().unlock("1234");
+    expect(useLock.getState().locked).toBe(false);
+
+    // Nothing brings the screen back on its own; asking does.
+    useLock.getState().lockNow();
+    expect(useLock.getState().locked).toBe(true);
+  });
+
+  it("tells the core to shut the vault, not only the screen", async () => {
+    // The webview drawing a curtain stops nothing: the commands behind
+    // it answered descriptors and balances all the same.
+    const called: string[] = [];
+    mockIPC((cmd) => {
+      called.push(cmd);
+      if (cmd === "lock_app") return undefined;
+      throw new Error(`unexpected command ${cmd}`);
+    });
+    useLock.getState().syncFromSettings(PIN);
+    useLock.setState({ locked: false });
+    await Promise.resolve();
+    called.length = 0;
+
+    useLock.getState().lockNow();
+
+    expect(useLock.getState().locked).toBe(true);
+    await Promise.resolve();
+    expect(called).toEqual(["lock_app"]);
+  });
+
+  it("shuts the vault too when the first read puts the screen up", async () => {
+    // A reload of the webview reads the settings for the first time
+    // again, with the lock set earlier in the session, while the core
+    // may still be open. The screen alone would be a curtain over a
+    // vault that answers, and the Rust side would post alerts that
+    // name the wallet and the amount over the lock screen.
+    const called: string[] = [];
+    mockIPC((cmd) => {
+      called.push(cmd);
+      if (cmd === "lock_app") return undefined;
+      throw new Error(`unexpected command ${cmd}`);
+    });
+    useLock.getState().syncFromSettings(PIN);
+    expect(useLock.getState().locked).toBe(true);
+    await Promise.resolve();
+    expect(called).toEqual(["lock_app"]);
+
+    // Later reads leave both alone, whatever they carry.
+    useLock.setState({ locked: false });
+    useLock.getState().syncFromSettings(PIN);
+    useLock.getState().syncFromSettings(null);
+    await Promise.resolve();
+    expect(called).toEqual(["lock_app"]);
+    expect(useLock.getState().locked).toBe(false);
+  });
+
+  it("asks nothing of the core when the vault holds no lock", async () => {
+    const called: string[] = [];
+    mockIPC((cmd) => {
+      called.push(cmd);
+      return undefined;
+    });
+    useLock.getState().syncFromSettings(null);
+    await Promise.resolve();
+    expect(called).toEqual([]);
+  });
+
+  it("a refused secret leaves the screen up", async () => {
+    mockIPC((cmd) => {
+      if (cmd === "verify_app_lock") {
+        return { unlocked: false, failures: 1, retry_after_secs: 0 };
+      }
+      throw new Error(`unexpected command ${cmd}`);
+    });
+    useLock.getState().syncFromSettings(PIN);
+
+    const verdict = await useLock.getState().unlock("0000");
+
+    expect(verdict.unlocked).toBe(false);
+    expect(useLock.getState().locked).toBe(true);
+  });
+});

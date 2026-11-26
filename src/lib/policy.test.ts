@@ -1,0 +1,634 @@
+import { describe, expect, it } from "vitest";
+import type {
+  BranchRole,
+  BranchState,
+  BranchTone,
+  Condition,
+  PolicyBranch,
+  PolicyKey,
+  PolicySnapshot,
+  Remaining,
+  Timelock,
+} from "./ipc";
+import {
+  branchStatus,
+  conditionOutline,
+  countdown,
+  describePolicy,
+  hasTimeBasedLocks,
+  policyDigest,
+  remainingWords,
+  timelockText,
+} from "./policy";
+import type { PolicyDigest } from "./policy";
+
+/** A digest as one string, the figure then the label, as the Overview
+    row reads it. */
+function digestText(digest: PolicyDigest): string {
+  return `${digest.figure} ${digest.label}`.trim();
+}
+
+const NOW = 1_755_000_000;
+const TIP = 200_000;
+
+const KEYS: PolicyKey[] = [
+  { id: "k0", label: "Key A", fingerprint: "3442193e", origin_path: null, key_short: "xpubA…aaaa" },
+  { id: "k1", label: "Key B", fingerprint: "5c1bd648", origin_path: "m/48'/1'/0'/2'", key_short: "xpubB…bbbb" },
+  { id: "k2", label: "Key C", fingerprint: "bd16bee5", origin_path: null, key_short: "xpubC…cccc" },
+];
+
+const key = (id: string): Condition => ({ kind: "key", key_id: id });
+const older = (blocks: number): Condition => ({ kind: "older", lock: { kind: "blocks", blocks } });
+const and = (...items: Condition[]): Condition => ({
+  kind: "thresh",
+  k: items.length,
+  n: items.length,
+  items,
+});
+const thresh = (k: number, ...items: Condition[]): Condition => ({
+  kind: "thresh",
+  k,
+  n: items.length,
+  items,
+});
+
+function blocksLeft(blocks: number): Remaining {
+  return {
+    remaining_blocks: blocks,
+    remaining_seconds: blocks * 600,
+    unlocks_at_unix: NOW + blocks * 600,
+  };
+}
+
+function relative(blocks: number, state: Timelock["state"], required = true): Timelock {
+  return { lock: { kind: "relative", lock: { kind: "blocks", blocks } }, required, state };
+}
+
+/** A branch as the core hands it over. The tone is the core's to give:
+    a test about it names it, the others take a stand-in. */
+function branch(
+  id: string,
+  role: BranchRole,
+  label: string,
+  condition: Condition,
+  state: BranchState,
+  timelocks: Timelock[] = [],
+  tone: BranchTone = state.kind === "spendable_now" ? "confirmed" : "neutral",
+): PolicyBranch {
+  return {
+    id,
+    role,
+    label,
+    summary: label,
+    condition,
+    timelocks,
+    state,
+    spendable_now: state.kind === "spendable_now",
+    tone,
+  };
+}
+
+function snapshot(partial: Partial<PolicySnapshot>): PolicySnapshot {
+  return {
+    kind: "miniscript",
+    script: "witness_script",
+    descriptor: "wsh(...)",
+    policy: "",
+    keys: KEYS,
+    branches: [],
+    tip_height: TIP,
+    computed_at: NOW,
+    time_basis: "wall_clock",
+    coins: 0,
+    has_timelocks: true,
+    ...partial,
+  };
+}
+
+const OPEN: BranchState = { kind: "spendable_now" };
+
+/** `sortedmulti(1, A, B)` as the core hands it over: a multisig split
+    into one open branch per key. */
+function anyOfTwo(): PolicySnapshot {
+  return snapshot({
+    kind: "multisig",
+    has_timelocks: false,
+    keys: KEYS.slice(0, 2),
+    branches: [
+      branch("b0", "primary", "Primary", key("k0"), OPEN),
+      branch("b1", "primary", "Primary B", key("k1"), OPEN),
+    ],
+  });
+}
+
+/** Key A any time, Key B after a year-long wait, three coins counted. */
+function liana(state: BranchState): PolicySnapshot {
+  return snapshot({
+    coins: 3,
+    branches: [
+      branch("b0", "primary", "Primary", key("k0"), OPEN),
+      branch("b1", "recovery", "Recovery", and(key("k1"), older(52_560)), state, [
+        relative(52_560, state.kind === "per_coin" ? state : { kind: "no_coins", blocks: 52_560, seconds: null }),
+      ]),
+    ],
+  });
+}
+
+describe("describePolicy", () => {
+  it("has a sentence for every simple case", () => {
+    expect(describePolicy(snapshot({ kind: "address", keys: [] }))).toBe(
+      "An address has no policy Gerfaut can read.",
+    );
+    expect(describePolicy(snapshot({ kind: "single_key" }))).toBe(
+      "One key signs. Any coin is spendable now.",
+    );
+    expect(
+      describePolicy(
+        snapshot({
+          kind: "multisig",
+          branches: [branch("b0", "primary", "Primary", thresh(2, key("k0"), key("k1"), key("k2")), OPEN)],
+        }),
+      ),
+    ).toBe("2 of 3 keys sign.");
+    expect(
+      describePolicy(
+        snapshot({
+          kind: "multisig",
+          branches: [branch("b0", "primary", "Primary", and(key("k0"), key("k1"), key("k2")), OPEN)],
+        }),
+      ),
+    ).toBe("Keys A, B and C sign.");
+  });
+
+  it("counts a one of n multisig across the branches the core split it into", () => {
+    // `sortedmulti(1, A, B)` is one threshold to the core's kind and two
+    // branches to its list, one key each: read together, not as the first.
+    expect(describePolicy(anyOfTwo())).toBe("Any of 2 keys signs.");
+    expect(digestText(policyDigest(anyOfTwo()))).toBe("Any of 2 keys");
+    // The core now keeps it as one branch: the same words either way.
+    const asOne = snapshot({
+      kind: "multisig",
+      has_timelocks: false,
+      branches: [branch("b0", "primary", "Primary", thresh(1, key("k0"), key("k1"), key("k2")), OPEN)],
+    });
+    expect(describePolicy(asOne)).toBe("Any of 3 keys signs.");
+    expect(digestText(policyDigest(asOne))).toBe("Any of 3 keys");
+    const locked = snapshot({
+      branches: [
+        branch(
+          "b0",
+          "primary",
+          "Primary",
+          and(thresh(1, key("k0"), key("k1")), older(144)),
+          { kind: "no_coins" },
+          [relative(144, { kind: "no_coins", blocks: 144, seconds: null })],
+        ),
+      ],
+    });
+    expect(describePolicy(locked)).toBe("Any of 2 keys signs once a coin has waited about 1 day.");
+  });
+
+  it("reads a recovery path in plain words", () => {
+    const state: BranchState = { kind: "per_coin", unlocked: 1, waiting: 0, locked: 2, next: blocksLeft(42_480) };
+    expect(describePolicy(liana(state))).toBe(
+      "Key A signs. A recovery key can spend once a coin has waited about 1 year.",
+    );
+  });
+
+  it("names a group of recovery keys by its threshold", () => {
+    // The one timelocked path of a wallet is its recovery path: the core
+    // hands out "emergency" only to the second.
+    const wallet = snapshot({
+      branches: [
+        branch("b0", "primary", "Primary", thresh(2, key("k0"), key("k1"), key("k2")), OPEN),
+        branch(
+          "b1",
+          "recovery",
+          "Recovery",
+          and(thresh(2, key("k0"), key("k1"), key("k2")), older(4_320)),
+          { kind: "no_coins" },
+          [relative(4_320, { kind: "no_coins", blocks: 4_320, seconds: null })],
+        ),
+      ],
+    });
+    expect(describePolicy(wallet)).toBe(
+      "2 of 3 keys sign. Any 2 of 3 recovery keys can spend once a coin has waited about 30 days.",
+    );
+  });
+
+  it("dates an absolute lock from now, and says when it has passed", () => {
+    const height = TIP + 1_432;
+    const condition = and(key("k0"), { kind: "after", lock: { kind: "height", height } });
+    const ahead = snapshot({
+      branches: [
+        branch("b0", "primary", "Primary", condition, { kind: "locked", until: blocksLeft(1_432) }, [
+          {
+            lock: { kind: "absolute", lock: { kind: "height", height } },
+            required: true,
+            state: { kind: "locked", until: blocksLeft(1_432) },
+          },
+        ]),
+      ],
+    });
+    expect(describePolicy(ahead)).toBe(
+      `Key A signs after block 201${" "}432, about 10 days from now.`,
+    );
+    const passed = snapshot({
+      branches: [
+        branch("b0", "primary", "Primary", condition, OPEN, [
+          {
+            lock: { kind: "absolute", lock: { kind: "height", height } },
+            required: true,
+            state: { kind: "unlocked" },
+          },
+        ]),
+      ],
+    });
+    expect(describePolicy(passed)).toBe(
+      `Key A signs now that block 201${" "}432 has passed.`,
+    );
+  });
+
+  it("says a secret is needed without claiming to know it", () => {
+    const wallet = snapshot({
+      branches: [
+        branch("b0", "primary", "Primary", key("k0"), OPEN),
+        branch(
+          "b1",
+          "other",
+          "Other",
+          and(key("k1"), { kind: "preimage", hash: "sha256" }),
+          { kind: "needs_preimage" },
+        ),
+      ],
+    });
+    expect(describePolicy(wallet)).toBe(
+      "Key A signs. Key B can spend with the secret behind a sha256 hash.",
+    );
+  });
+
+  it("names a mixed threshold by its members and states a lock once", () => {
+    // The optional lock inside the threshold belongs to the subject; a
+    // required one outside it is the tail, and it is said only there.
+    const mixed = thresh(2, key("k0"), key("k1"), older(100));
+    const open = snapshot({
+      branches: [
+        branch("b0", "primary", "Primary", mixed, OPEN, [
+          relative(100, { kind: "no_coins", blocks: 100, seconds: null }, false),
+        ]),
+      ],
+    });
+    expect(describePolicy(open)).toBe("Any 2 of Key A, Key B, a wait of 100 blocks can spend.");
+    const height = TIP + 1_432;
+    const gated = snapshot({
+      branches: [
+        branch(
+          "b0",
+          "primary",
+          "Primary",
+          and(mixed, { kind: "after", lock: { kind: "height", height } }),
+          { kind: "locked", until: blocksLeft(1_432) },
+          [
+            relative(100, { kind: "no_coins", blocks: 100, seconds: null }, false),
+            {
+              lock: { kind: "absolute", lock: { kind: "height", height } },
+              required: true,
+              state: { kind: "locked", until: blocksLeft(1_432) },
+            },
+          ],
+        ),
+      ],
+    });
+    expect(describePolicy(gated)).toBe(
+      "Any 2 of Key A, Key B, a wait of 100 blocks can spend after block 201 432, about 10 days from now.",
+    );
+  });
+
+  it("spells out a recovery path no count says right", () => {
+    const recovery = (condition: Condition) =>
+      snapshot({
+        branches: [
+          branch("b0", "primary", "Primary", key("k0"), OPEN),
+          branch("b1", "recovery", "Recovery", and(condition, older(4_320)), { kind: "no_coins" }, [
+            relative(4_320, { kind: "no_coins", blocks: 4_320, seconds: null }),
+          ]),
+        ],
+      });
+    expect(describePolicy(recovery(and(key("k0"), thresh(1, key("k1"), key("k2")))))).toBe(
+      "Key A signs. Key A and (Key B or Key C) can spend once a coin has waited about 30 days.",
+    );
+    expect(describePolicy(recovery(thresh(1, key("k1"), key("k2"))))).toBe(
+      "Key A signs. Any of 2 recovery keys can spend once a coin has waited about 30 days.",
+    );
+  });
+});
+
+describe("conditionOutline", () => {
+  it("keeps a flat threshold on one line", () => {
+    expect(conditionOutline(thresh(2, key("k0"), key("k1"), key("k2")), KEYS)).toEqual({
+      text: "Any 2 of Key A, Key B, Key C",
+      items: [],
+    });
+    expect(conditionOutline(and(key("k1"), older(52_560)), KEYS).text).toMatch(
+      /^Key B and a wait of 52.560 blocks$/,
+    );
+    expect(conditionOutline(thresh(1, key("k0"), key("k1")), KEYS).text).toBe("Key A or Key B");
+  });
+
+  it("indents one level and keeps deeper nesting inline", () => {
+    const nested = and(thresh(1, key("k0"), key("k1")), older(144), thresh(1, key("k2"), and(key("k0"), key("k1"))));
+    expect(conditionOutline(nested, KEYS)).toEqual({
+      text: "All of:",
+      items: ["Key A or Key B", "A wait of 144 blocks", "Key C or (Key A and Key B)"],
+    });
+  });
+});
+
+describe("timelockText", () => {
+  it("states a relative lock in blocks and in time", () => {
+    expect(timelockText(relative(52_560, { kind: "no_coins", blocks: 52_560, seconds: null }))).toMatch(
+      /^52.560 blocks after the coin arrives ≈ 1 year$/,
+    );
+    expect(timelockText(relative(144, { kind: "no_coins", blocks: 144, seconds: null }, false))).toBe(
+      "144 blocks after the coin arrives ≈ 1 day (optional)",
+    );
+  });
+
+  it("states an absolute lock with what is left, or that it is behind", () => {
+    const height = TIP + 1_432;
+    const lock = { kind: "absolute", lock: { kind: "height", height } } as const;
+    expect(
+      timelockText({ lock, required: true, state: { kind: "locked", until: blocksLeft(1_432) } }),
+    ).toMatch(/^Block 201.432 ≈ in 10 days$/);
+    expect(timelockText({ lock, required: true, state: { kind: "unlocked" } })).toMatch(
+      /^Block 201.432 · reached$/,
+    );
+  });
+
+  it("dates a time lock and says what is left, like a height lock", () => {
+    const unix = NOW + 10 * 86_400;
+    const lock = { kind: "absolute", lock: { kind: "time", unix } } as const;
+    const left = { remaining_blocks: null, remaining_seconds: 10 * 86_400, unlocks_at_unix: unix };
+    expect(timelockText({ lock, required: true, state: { kind: "locked", until: left } })).toMatch(
+      /^After \w{3} \d{2}, \d{4} ≈ in 10 days$/,
+    );
+    expect(timelockText({ lock, required: true, state: { kind: "unlocked" } })).toMatch(
+      /^After \w{3} \d{2}, \d{4} · reached$/,
+    );
+  });
+
+  it("knows which locks the clock decides", () => {
+    const timed: Timelock = {
+      lock: { kind: "relative", lock: { kind: "seconds", seconds: 51_200 } },
+      required: true,
+      state: { kind: "no_coins", blocks: null, seconds: 51_200 },
+    };
+    expect(timelockText(timed)).toMatch(/^51.200 seconds after the coin arrives ≈ 14 hours$/);
+    expect(hasTimeBasedLocks(liana({ kind: "no_coins" }))).toBe(false);
+    expect(
+      hasTimeBasedLocks(
+        snapshot({ branches: [branch("b0", "primary", "Primary", key("k0"), OPEN, [timed])] }),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("branchStatus", () => {
+  it("takes the core's tone and says it in a glyph and words too", () => {
+    expect(branchStatus(branch("b", "primary", "Primary", key("k0"), OPEN))).toEqual({
+      tone: "confirmed",
+      glyph: "check",
+      text: "Spendable now",
+      waiting: null,
+    });
+    const locked: BranchState = { kind: "locked", until: blocksLeft(1_432) };
+    const soon = branchStatus(branch("b", "primary", "Primary", key("k0"), locked, [], "pending"));
+    expect(soon.tone).toBe("pending");
+    expect(soon.glyph).toBe("clock");
+    expect(soon.text).toMatch(/^In 1.432 blocks ≈ 10 days$/);
+    expect(soon.waiting).toBeNull();
+    // The same state in another tone keeps its words: the colour is
+    // the core's call alone.
+    const far = branchStatus(branch("b", "primary", "Primary", key("k0"), locked, [], "neutral"));
+    expect(far).toEqual({ ...soon, tone: "neutral" });
+  });
+
+  it("counts coins in the pill and the ones a block away on a line of their own", () => {
+    const mixed = branchStatus(
+      branch(
+        "b",
+        "recovery",
+        "Recovery",
+        key("k1"),
+        { kind: "per_coin", unlocked: 3, waiting: 2, locked: 1, next: blocksLeft(1_728) },
+        [],
+        "pending",
+      ),
+    );
+    // The pill keeps to the count: the next coin's wait is the "Next
+    // coin" line's, the coins a block away have their own line.
+    expect(mixed).toEqual({
+      tone: "pending",
+      glyph: "clock",
+      text: "3 of 6 coins unlocked",
+      waiting: "2 waiting for a block",
+    });
+    const many = branchStatus(
+      branch("b", "recovery", "Recovery", key("k1"), {
+        kind: "per_coin",
+        unlocked: 0,
+        waiting: 1_200,
+        locked: 0,
+        next: null,
+      }),
+    );
+    expect(many.text).toMatch(/^0 of 1.200 coins unlocked$/);
+    expect(many.waiting).toMatch(/^1.200 waiting for a block$/);
+    // Every coin open: the core says confirmed, and the pill checks.
+    const all = branchStatus(
+      branch(
+        "b",
+        "recovery",
+        "Recovery",
+        key("k1"),
+        { kind: "per_coin", unlocked: 2, waiting: 0, locked: 0, next: null },
+        [],
+        "confirmed",
+      ),
+    );
+    expect(all).toEqual({
+      tone: "confirmed",
+      glyph: "check",
+      text: "2 of 2 coins unlocked",
+      waiting: null,
+    });
+    expect(branchStatus(branch("b", "recovery", "Recovery", key("k1"), { kind: "no_coins" }))).toEqual({
+      tone: "neutral",
+      glyph: "coins",
+      text: "No coins yet",
+      waiting: null,
+    });
+    expect(
+      branchStatus(branch("b", "other", "Other", key("k1"), { kind: "needs_preimage" })).text,
+    ).toBe("Needs a secret");
+  });
+});
+
+describe("countdown", () => {
+  it("measures the nearest coin against the longest relative lock", () => {
+    const state: BranchState = { kind: "per_coin", unlocked: 1, waiting: 0, locked: 2, next: blocksLeft(42_480) };
+    const [, recovery] = liana(state).branches;
+    const timer = countdown(recovery);
+    expect(timer?.nextCoin).toMatch(/^42.480 blocks ≈ 295 days$/);
+    expect(timer?.progress).toBeCloseTo((52_560 - 42_480) / 52_560, 5);
+  });
+
+  it("has no bar for an absolute lock and nothing at all without a wait", () => {
+    const locked = countdown(
+      branch("b", "primary", "Primary", key("k0"), { kind: "locked", until: blocksLeft(10) }),
+    );
+    // An absolute lock has no "Next coin" line.
+    expect(locked).toEqual({ remaining: blocksLeft(10), progress: null, nextCoin: null });
+    expect(countdown(branch("b", "primary", "Primary", key("k0"), OPEN))).toBeNull();
+    expect(countdown(branch("b", "recovery", "Recovery", key("k1"), { kind: "no_coins" }))).toBeNull();
+  });
+});
+
+describe("policyDigest", () => {
+  it("fits the balance row in the grammar of the counts", () => {
+    expect(digestText(policyDigest(snapshot({ kind: "single_key" })))).toBe("1 key");
+    expect(digestText(policyDigest(snapshot({ kind: "address", keys: [] })))).toBe("1 address");
+    expect(
+      digestText(
+        policyDigest(
+          snapshot({
+            kind: "multisig",
+            branches: [branch("b0", "primary", "Primary", thresh(2, key("k0"), key("k1"), key("k2")), OPEN)],
+          }),
+        ),
+      ),
+    ).toBe("2 of 3 keys");
+  });
+
+  it("leads with the nearest timed path and where it stands", () => {
+    const counting: BranchState = { kind: "per_coin", unlocked: 1, waiting: 0, locked: 2, next: blocksLeft(20_448) };
+    expect(digestText(policyDigest(liana(counting)))).toBe("Recovery in 142 days");
+    expect(digestText(policyDigest(liana({ kind: "no_coins" })))).toBe("Recovery after 1 year");
+    const open: BranchState = { kind: "per_coin", unlocked: 3, waiting: 0, locked: 0, next: null };
+    expect(digestText(policyDigest(liana(open)))).toBe("Recovery unlocked");
+    const waiting: BranchState = { kind: "per_coin", unlocked: 0, waiting: 1, locked: 0, next: null };
+    expect(digestText(policyDigest(liana(waiting)))).toBe("Recovery waiting for a block");
+  });
+
+  it("says when the only path itself still waits", () => {
+    const height = TIP + 1_432;
+    const wallet = snapshot({
+      branches: [
+        branch(
+          "b0",
+          "primary",
+          "Primary",
+          and(key("k0"), { kind: "after", lock: { kind: "height", height } }),
+          { kind: "locked", until: blocksLeft(1_432) },
+        ),
+      ],
+    });
+    expect(digestText(policyDigest(wallet))).toBe("Spendable in 10 days");
+    expect(policyDigest(wallet)).toEqual({ figure: "Spendable", label: "in 10 days" });
+  });
+
+  it("leads with the primary path when it is the one that waits", () => {
+    // Every path waits: the core makes the nearest one primary and lists
+    // it first. The row says where that one stands, not where the path
+    // behind it does.
+    const counting = (blocks: number, state: BranchState): PolicyBranch =>
+      branch(
+        `b${blocks}`,
+        blocks === 4_320 ? "primary" : "recovery",
+        blocks === 4_320 ? "Primary" : "Recovery",
+        and(key(blocks === 4_320 ? "k0" : "k1"), older(blocks)),
+        state,
+        [relative(blocks, state.kind === "per_coin" ? state : { kind: "no_coins", blocks, seconds: null })],
+      );
+    const perCoin = snapshot({
+      coins: 2,
+      branches: [
+        counting(4_320, { kind: "per_coin", unlocked: 1, waiting: 0, locked: 1, next: blocksLeft(1_440) }),
+        counting(52_560, { kind: "per_coin", unlocked: 0, waiting: 0, locked: 2, next: blocksLeft(50_000) }),
+      ],
+    });
+    expect(digestText(policyDigest(perCoin))).toBe("1 of 2 coins unlocked");
+    const empty = snapshot({
+      branches: [counting(4_320, { kind: "no_coins" }), counting(52_560, { kind: "no_coins" })],
+    });
+    expect(digestText(policyDigest(empty))).toBe("Spendable after 30 days");
+  });
+});
+
+describe("a wallet that never synced", () => {
+  const height = TIP + 1_432;
+  const unknown: Remaining = { remaining_blocks: null, remaining_seconds: null, unlocks_at_unix: null };
+  const after: Condition = { kind: "after", lock: { kind: "height", height } };
+  const lock: Timelock = {
+    lock: { kind: "absolute", lock: { kind: "height", height } },
+    required: true,
+    state: { kind: "locked", until: unknown },
+  };
+  const primary = branch("b0", "primary", "Primary", and(key("k0"), after), { kind: "locked", until: unknown }, [lock]);
+
+  it("has no tip to measure an absolute lock from, and says so", () => {
+    const wallet = snapshot({ tip_height: null, keys: KEYS.slice(0, 1), branches: [primary] });
+    expect(branchStatus(primary)).toEqual({
+      tone: "neutral",
+      glyph: "clock",
+      text: "Locked",
+      waiting: null,
+    });
+    expect(countdown(primary)).toBeNull();
+    // Unknown is said as unknown, never as a distance of zero.
+    expect(remainingWords(unknown)).toBe("an unknown time");
+    expect(timelockText(lock)).toMatch(/^Block 201.432$/);
+    expect(describePolicy(wallet)).toMatch(/^Key A signs after block 201.432\.$/);
+    // Nothing is known of the wait: the row keeps to the keys.
+    expect(digestText(policyDigest(wallet))).toBe("1 key");
+  });
+
+  it("calls a later path locked rather than dating it", () => {
+    const wallet = snapshot({
+      tip_height: null,
+      branches: [
+        branch("b0", "primary", "Primary", key("k0"), OPEN),
+        branch("b1", "recovery", "Recovery", and(key("k1"), after), { kind: "locked", until: unknown }, [lock]),
+      ],
+    });
+    expect(digestText(policyDigest(wallet))).toBe("Recovery locked");
+    expect(describePolicy(wallet)).toMatch(/^Key A signs\. A recovery key can spend after block 201.432\.$/);
+  });
+
+  /** A coin waits behind a relative lock, and nothing yet says for how
+      long: the "Next coin" line says when it will, with no figure, no
+      colour and no bar; the pill keeps to the count, and the row calls
+      the path locked, as on Android. */
+  it("says a coin's count comes with the first sync", () => {
+    const state: BranchState = { kind: "per_coin", unlocked: 0, waiting: 0, locked: 1, next: unknown };
+    const recovery = branch("b1", "recovery", "Recovery", and(key("k1"), older(52_560)), state, [
+      relative(52_560, state),
+    ]);
+    const wallet = snapshot({
+      tip_height: null,
+      branches: [branch("b0", "primary", "Primary", key("k0"), OPEN), recovery],
+    });
+    expect(branchStatus(recovery)).toEqual({
+      tone: "neutral",
+      glyph: "clock",
+      text: "0 of 1 coin unlocked",
+      waiting: null,
+    });
+    expect(countdown(recovery)).toEqual({
+      remaining: unknown,
+      progress: null,
+      nextCoin: "known after the first sync",
+    });
+    expect(digestText(policyDigest(wallet))).toBe("Recovery locked");
+  });
+});

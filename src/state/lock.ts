@@ -1,0 +1,153 @@
+// The app lock: what stands between an unlocked computer and the
+// wallets.
+//
+// The vault is encrypted whatever happens; the lock is the curtain in
+// front of it. The secret never leaves the core, which hashes it and
+// slows repeated guesses down; this store holds only whether the lock
+// screen is showing.
+//
+// Gerfaut asks for the secret when it opens, and again once its owner
+// has been away: the delay they chose, counted from their last gesture
+// in the window (`state/autoLock`). The count lives in memory alone, so
+// a window closed and opened again is always locked. Ctrl+L is how
+// someone leaving the desk draws the curtain at once.
+//
+// The curtain falls in two places. Here, so nothing of a wallet is in
+// the tree; and in the core, told through `lock_app`, so the vault
+// itself answers nothing while it is down. The second one is what
+// holds when the first one is got around.
+
+import { useEffect } from "react";
+import { create } from "zustand";
+import type { AppLock, LockVerdict, Settings } from "../lib/ipc";
+import { ipc, isCommandError } from "../lib/ipc";
+
+/** Whether a command came back refused because the app is locked. */
+export function isLockedError(error: unknown): boolean {
+  return isCommandError(error) && error.kind === "locked";
+}
+
+/** The settings cut down to what the lock screen is drawn from: the
+    theme, and the kind of secret to ask for.
+
+    The Rust side cuts them the same way when it answers behind the
+    lock. It is done here as well because the copy already in the cache
+    when the curtain falls was answered in full — backends, accepted
+    certificates, the shared preferences — and dropping the entry
+    outright would lose the theme and flash the splash on the way to
+    the lock screen. */
+export function lockedSettings(settings: Settings): Settings {
+  const kept: Settings["app_prefs"] = {};
+  for (const key of LOCKED_PREFS) {
+    const value = settings.app_prefs[key];
+    if (value !== undefined) kept[key] = value;
+  }
+  return {
+    ...SHUT,
+    preferences: { ...SHUT.preferences },
+    tor: { ...SHUT.tor },
+    active_network: settings.active_network,
+    app_lock: settings.app_lock,
+    app_prefs: kept,
+  };
+}
+
+/** What the Rust side answers behind the lock for everything it does
+    not keep: the defaults of the core's `Settings`, the shared
+    preferences among them. */
+const SHUT: Omit<Settings, "active_network" | "app_lock" | "app_prefs"> = {
+  backends: {},
+  gap_limit: 20,
+  electrum_certs: {},
+  tor: { mode: "auto", socks_proxy: null },
+  preferences: {
+    unit: "btc",
+    masked: false,
+    fiat: false,
+    fiat_currency: "eur",
+    price_source: "mempool_space",
+    notify_new_tx: false,
+    explorer_ack: false,
+  },
+};
+
+/** The preferences that survive the curtain, the same three the Rust
+    side keeps: the theme, so the lock screen is not painted in the wrong
+    one; whether the welcome tour has been through, so it is not shown
+    again at every unlock; and the delay before the lock comes back, so
+    the count after an unlock runs on the one chosen. None says what the
+    vault holds. */
+const LOCKED_PREFS = ["desktop.theme", "onboarding.seen", "lock.delay"] as const;
+
+interface LockState {
+  /** The lock the vault holds, without its hash; null when none. */
+  lock: AppLock | null;
+  /** The lock screen is showing and nothing else is in the tree. */
+  locked: boolean;
+  /** The vault has been read once, so a lock present has already put
+      the screen up. Nothing of a wallet may render before this. */
+  seen: boolean;
+  /** Takes the lock from the settings the vault just handed over.
+      The vault is the single source of truth here; this store only
+      knows whether the screen is up right now. The first read with a
+      lock in it locks — a later one never does, so turning a lock on
+      does not shut the user out of the screen they are standing on. */
+  syncFromSettings: (lock: AppLock | null) => void;
+  unlock: (secret: string) => Promise<LockVerdict>;
+  lockNow: () => void;
+}
+
+export const useLock = create<LockState>((set, get) => ({
+  lock: null,
+  locked: false,
+  seen: false,
+
+  syncFromSettings: (lock) => {
+    const first = !get().seen;
+    set({ lock, seen: true, locked: first ? lock !== null : get().locked });
+    // The screen and the vault come up shut together. At launch the
+    // core is shut already, and this changes nothing. After a reload
+    // of the webview it may still be open while this screen goes up:
+    // everything behind the curtain would answer, and the alerts the
+    // Rust side posts would name the wallet and the amount over it.
+    if (first && lock !== null) void ipc.lockApp().catch(() => {});
+  },
+
+  unlock: async (secret) => {
+    const verdict = await ipc.verifyAppLock(secret);
+    if (verdict.unlocked) set({ locked: false });
+    return verdict;
+  },
+
+  lockNow: () => {
+    if (get().lock === null) return;
+    // The curtain first, so nothing of a wallet is drawn while the
+    // vault is being shut; then the vault, which is what actually
+    // stops answering. A vault that refuses before the screen has
+    // changed would only paint failures over the wallet it is hiding.
+    set({ locked: true });
+    void ipc.lockApp().catch(() => {});
+  },
+}));
+
+/** Ctrl+L: the way back to the lock screen without waiting for the
+    delay. Bound while a lock exists and the app is open — on the lock
+    screen itself the shortcut has nothing left to do. */
+export function useLockShortcut(): void {
+  const lock = useLock((state) => state.lock);
+  const locked = useLock((state) => state.locked);
+
+  useEffect(() => {
+    if (lock === null || locked) return;
+
+    const onKey = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.key.toLowerCase() === "l") {
+        event.preventDefault();
+        useLock.getState().lockNow();
+      }
+    };
+
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lock, locked]);
+}

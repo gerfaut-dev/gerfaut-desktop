@@ -1,0 +1,365 @@
+import { clsx } from "clsx";
+import { Check, ChevronRight, Clock, Coins, Copy, Lock } from "lucide-react";
+import type { ReactNode } from "react";
+import { AddressChip } from "../components/AddressChip";
+import { IconButton } from "../components/Button";
+import { LoadFailure } from "../components/LoadFailure";
+import { PageHeader } from "../components/PageHeader";
+import { Pill } from "../components/StatusPill";
+import { formatTimestamp, groupThousands } from "../lib/format";
+import { multipathDescriptor } from "../lib/descriptor";
+import type { PolicyBranch, PolicyKey, PolicySnapshot, WalletKind } from "../lib/ipc";
+import type { Countdown as CountdownFigures } from "../lib/policy";
+import {
+  branchStatus,
+  conditionKeys,
+  conditionOutline,
+  countdown,
+  describePolicy,
+  hasTimeBasedLocks,
+  timelockText,
+} from "../lib/policy";
+import { useSnapshot, useWalletPolicy } from "../state/queries";
+import { useClipboard } from "../state/clipboard";
+
+/** The `label` style: section names, roles, the estimated date. */
+const LABEL = "font-ui text-xs font-medium uppercase tracking-[0.04em] text-muted";
+
+const CARDS = "grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4";
+
+/** What the descriptor says: who can spend, under which locks, and
+    whether each path is open right now. One page for every wallet, a
+    tap from the balance; the simple cases keep it short. */
+export function PolicyView({ walletId }: { walletId: string }) {
+  const snapshot = useSnapshot(walletId);
+  const policy = useWalletPolicy(walletId);
+  const name = snapshot.data?.meta.name;
+
+  return (
+    <div className="pb-6">
+      <PageHeader
+        title="Policy"
+        sub={
+          name && (
+            <>
+              {name}
+              {policy.data && <ReadAt tip={policy.data.tip_height} />}
+            </>
+          )
+        }
+      />
+
+      <div className="flex flex-col gap-6">
+        {policy.isPending ? (
+          <Placeholder />
+        ) : policy.isError || !policy.data ? (
+          // What failed, why, and a way to ask again, as on every page.
+          <LoadFailure
+            what="The policy"
+            error={policy.error}
+            retrying={policy.isFetching}
+            onRetry={() => void policy.refetch()}
+          />
+        ) : (
+          <Body snapshot={policy.data} wallet={snapshot.data?.meta.kind} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The tip the locks were read against, or the fact that there is none
+    yet: a wallet that never synced has no block to measure from. */
+function ReadAt({ tip }: { tip: number | null }) {
+  if (tip === null || tip === 0) return <>{" · not synced yet"}</>;
+  return (
+    <>
+      {" · read at block "}
+      <span className="tabular">{groupThousands(String(tip))}</span>
+    </>
+  );
+}
+
+/** Quiet lines where the page will be: no motion, one card's worth. */
+function Placeholder() {
+  return (
+    <div role="status" aria-label="Loading policy" aria-busy className="flex flex-col gap-6">
+      <div className="h-4 w-2/3 max-w-[480px] rounded-sm bg-sunken" />
+      <div className={CARDS}>
+        <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-6">
+          <div className="h-3 w-16 rounded-sm bg-sunken" />
+          <div className="h-4 w-3/4 rounded-sm bg-sunken" />
+          <div className="h-3 w-1/2 rounded-sm bg-sunken" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Body({ snapshot, wallet }: { snapshot: PolicySnapshot; wallet?: WalletKind }) {
+  const sentence = (
+    <p className="max-w-[65ch] font-ui text-base text-pretty text-text">
+      {describePolicy(snapshot)}
+    </p>
+  );
+
+  if (snapshot.kind === "address") {
+    return (
+      <>
+        {sentence}
+        <div>
+          <AddressChip value={snapshot.descriptor} head={12} tail={8} label="address" />
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      {sentence}
+      {/* One key needs no card: the sentence, the key and the descriptor
+          say it all. */}
+      {snapshot.kind !== "single_key" && (
+        <div className={CARDS}>
+          {snapshot.branches.map((branch) => (
+            <BranchCard key={branch.id} branch={branch} keys={snapshot.keys} />
+          ))}
+        </div>
+      )}
+      {hasTimeBasedLocks(snapshot) && (
+        <p className="font-ui text-xs text-muted">
+          Time locks compare against this device&apos;s clock; the chain can lag by up to two
+          hours.
+        </p>
+      )}
+      <KeysSection keys={snapshot.keys} />
+      <DescriptorSection snapshot={snapshot} wallet={wallet} />
+    </>
+  );
+}
+
+// --- branches -------------------------------------------------------------
+
+/** The glyph of each state: shapes that differ, so the state reads
+    without its colour. `data-glyph` names it for a test, which should
+    not read a class. */
+const GLYPH = { check: Check, clock: Clock, coins: Coins, lock: Lock };
+
+function BranchCard({ branch, keys }: { branch: PolicyBranch; keys: PolicyKey[] }) {
+  const outline = conditionOutline(branch.condition, keys);
+  const named = conditionKeys(branch.condition, keys);
+  const timer = countdown(branch);
+  const status = branchStatus(branch);
+  const Glyph = GLYPH[status.glyph];
+  return (
+    <section
+      aria-label={`${branch.label} path`}
+      className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-6"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <h2 className={LABEL}>{branch.label}</h2>
+        {/* At the narrowest window the card is 320px wide, and the pill
+            wraps rather than overflow. The coins a block from open are
+            counted as locked by the pill, and said on their own line
+            under it. */}
+        <div className="flex flex-col items-end gap-1">
+          <Pill
+            tone={status.tone}
+            icon={
+              <Glyph size={12} strokeWidth={2} aria-hidden data-glyph={status.glyph} className="shrink-0" />
+            }
+            wrap
+          >
+            {status.text}
+          </Pill>
+          {status.waiting && (
+            <p className="tabular font-ui text-xs text-muted">{status.waiting}</p>
+          )}
+        </div>
+      </div>
+
+      <div>
+        <p className="font-ui text-sm leading-snug text-text">{outline.text}</p>
+        {outline.items.length > 0 && (
+          <ul className="mt-2 flex flex-col gap-1 border-l border-border pl-3">
+            {outline.items.map((item) => (
+              <li key={item} className="font-ui text-sm text-text">
+                {item}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {named.length > 0 && (
+        <ul aria-label="Keys of this path" className="flex flex-wrap gap-1.5">
+          {named.map((key) => (
+            <li
+              key={key.id}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2 py-0.5"
+            >
+              <span className="font-ui text-xs font-medium text-text">{key.label}</span>
+              {key.fingerprint && (
+                <span className="font-data text-xs text-muted">{key.fingerprint}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {branch.timelocks.length > 0 && (
+        <ul aria-label="Locks" className="flex flex-col gap-1.5">
+          {branch.timelocks.map((timelock, index) => (
+            <li key={index} className="flex items-start gap-2 font-ui text-[13px] text-text">
+              <span className="flex h-5 shrink-0 items-center text-muted">
+                <Clock size={14} strokeWidth={1.5} aria-hidden />
+              </span>
+              <span className="tabular leading-5">{timelockText(timelock)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {timer && <CountdownBlock timer={timer} />}
+    </section>
+  );
+}
+
+/** What is left before the path opens: the blocks and the time they
+    come to, the date that makes, and for a relative lock how far the
+    nearest coin has come, or that its count comes with the first sync.
+    Neutral throughout; the pill holds the tone. */
+function CountdownBlock({ timer }: { timer: CountdownFigures }) {
+  const { remaining, progress, nextCoin } = timer;
+  return (
+    <div className="flex flex-col gap-1">
+      {nextCoin !== null && (
+        <p className="tabular text-[13px] font-medium text-text">
+          <span className={clsx(LABEL, "mr-2")}>Next coin</span>
+          {nextCoin}
+        </p>
+      )}
+      {remaining.unlocks_at_unix !== null && (
+        <p className={clsx(LABEL, "tabular")}>≈ {formatTimestamp(remaining.unlocks_at_unix)}</p>
+      )}
+      {progress !== null && (
+        <div
+          role="progressbar"
+          aria-label="Wait done"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(progress * 100)}
+          aria-valuetext={`${Math.round(progress * 100)}% of the wait`}
+          className="mt-1 h-1 overflow-hidden rounded-full bg-sunken"
+        >
+          <div className="h-full rounded-full bg-border" style={{ width: `${progress * 100}%` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- footer ---------------------------------------------------------------
+
+/** Every key of the policy, read-only and selectable: the label, the
+    fingerprint, the origin, the key shortened around its middle. */
+function KeysSection({ keys }: { keys: PolicyKey[] }) {
+  return (
+    <section aria-label="Keys">
+      <h2 className={clsx(LABEL, "mb-2")}>Keys</h2>
+      <ul className="selectable flex flex-col divide-y divide-border/60 rounded-lg border border-border bg-surface">
+        {keys.map((key) => (
+          <li key={key.id} className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5 px-4 py-2.5">
+            <span className="w-14 shrink-0 font-ui text-[13px] font-medium text-text">
+              {key.label}
+            </span>
+            <span className="font-data text-[13px] text-text">{key.fingerprint ?? "—"}</span>
+            {key.origin_path && (
+              <span className="font-data text-[13px] text-muted">{key.origin_path}</span>
+            )}
+            <span className="ml-auto font-data text-[13px] text-muted">{key.key_short}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** The descriptor the page shows and copies: the wallet whole, its
+    receive and change branches as one multipath descriptor (`<0;1>`),
+    the form it was most likely imported in. The core reads the policy
+    from the receive branch alone, and that one copied elsewhere would
+    have watched the wallet without its change. When the two do not make
+    one descriptor, the receive one, as before. */
+export function shownDescriptor(snapshot: PolicySnapshot, wallet?: WalletKind): string {
+  if (wallet?.type !== "descriptors" || wallet.internal === null) return snapshot.descriptor;
+  if (wallet.external !== snapshot.descriptor) return snapshot.descriptor;
+  return multipathDescriptor(wallet.external, wallet.internal) ?? snapshot.descriptor;
+}
+
+/** The descriptor, folded by default, with the normalized policy under
+    it: the keys named, the locks as consensus values. */
+function DescriptorSection({ snapshot, wallet }: { snapshot: PolicySnapshot; wallet?: WalletKind }) {
+  // The descriptor is what lets anyone watch the wallet: it leaves the
+  // clipboard history out, and the clipboard a minute later.
+  const { copy: copyText, copied } = useClipboard({ sensitive: true });
+  const descriptor = shownDescriptor(snapshot, wallet);
+  const copy = () => copyText(descriptor);
+
+  return (
+    <details className="group">
+      <summary
+        className={clsx(
+          LABEL,
+          "inline-flex cursor-pointer list-none items-center gap-1.5 rounded-md py-1 pr-1 transition-colors duration-150 hover:text-text [&::-webkit-details-marker]:hidden",
+        )}
+      >
+        <ChevronRight
+          size={14}
+          strokeWidth={1.75}
+          aria-hidden
+          className="transition-transform duration-150 group-open:rotate-90"
+        />
+        Descriptor
+      </summary>
+      <div className="mt-2 flex flex-col gap-3">
+        {/* The button is a row item, not an overlay: the block is never
+            shorter than the button it holds, a one-line descriptor
+            centres on it, a long one starts at the top beside it. */}
+        <div className="flex items-start gap-1 rounded-md bg-sunken py-1.5 pr-1.5 pl-3">
+          <p className="selectable flex min-h-10 min-w-0 flex-1 items-center break-all py-1.5 font-data text-[12px] leading-relaxed text-text">
+            {descriptor}
+          </p>
+          <IconButton
+            label="Copy descriptor"
+            className="shrink-0"
+            onClick={() => void copy()}
+          >
+            {copied ? (
+              <Check size={14} strokeWidth={1.5} aria-hidden className="text-confirmed" />
+            ) : (
+              <Copy size={14} strokeWidth={1.5} aria-hidden />
+            )}
+          </IconButton>
+        </div>
+        <div>
+          <p className={clsx(LABEL, "mb-1")}>Normalized policy</p>
+          <Mono className="text-muted">{snapshot.policy}</Mono>
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function Mono({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <p
+      className={clsx(
+        "selectable break-all rounded-md bg-sunken p-3 font-data text-[12px] leading-relaxed",
+        className,
+      )}
+    >
+      {children}
+    </p>
+  );
+}

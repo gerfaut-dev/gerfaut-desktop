@@ -1,0 +1,95 @@
+# The macOS build needs the Apple SDK, which is not free software: it is
+# never committed, never put in an image, never uploaded as an artifact.
+# A macOS runner, which ships Xcode, makes its two tarballs with the
+# committed scripts and checks them against the committed hashes. They
+# reach the Linux jobs of the same run through the Actions cache of this
+# repository.
+#
+# Sealed first, with .github/apple-sdk-cache.py: encrypted and
+# authenticated under the repository secret APPLE_SDK_CACHE_KEY. Anyone
+# who can start a workflow run can read the cache, and in a public
+# repository that includes a pull request from a fork, whose run never
+# gets the secret. Without it, this job refuses to run.
+#
+# Every run makes its own, in under a minute, under a key no other run
+# can work out: the id of the key, the id of the run and a random part.
+# Any job that runs a build script or an npm install script on a runner
+# can write to the cache. Under a key known in advance, such a job could
+# leave an entry for a later release to restore, and actions/cache
+# unpacks an entry, wherever its paths point, before anything can check
+# it. Changing the secret retires every entry sealed under the old one.
+#
+# Called by release.yml and macos-reference.yml, which pass the key it
+# returns to container-build.yml.
+
+name: Apple SDK
+
+on:
+  workflow_call:
+    outputs:
+      key:
+        description: The key of the Actions cache that holds the two sealed SDK tarballs
+        value: ${{ jobs.make.outputs.key }}
+    secrets:
+      apple-sdk-cache-key:
+        description: APPLE_SDK_CACHE_KEY, 64 hexadecimal digits
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  make:
+    # The image that ships Xcode 26.1.1, the version the hash is for.
+    runs-on: macos-15
+    timeout-minutes: 20
+    outputs:
+      key: ${{ steps.seal.outputs.key }}
+    steps:
+      - name: Refuse to run without the key of the cache
+        env:
+          APPLE_SDK_CACHE_KEY: ${{ secrets.apple-sdk-cache-key }}
+        run: |
+          [[ "$APPLE_SDK_CACHE_KEY" =~ ^[0-9a-fA-F]{64}$ ]] \
+            || { echo "::error::no APPLE_SDK_CACHE_KEY secret: the Apple SDK only goes into the cache sealed"; exit 1; }
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github
+            reproducible/macos
+
+      - name: Make the SDK from the runner's Xcode
+        run: |
+          set -euo pipefail
+          xcode=/Applications/Xcode_26.1.1.app
+          version="$(plutil -extract CFBundleShortVersionString raw "$xcode/Contents/version.plist")"
+          build="$(plutil -extract ProductBuildVersion raw "$xcode/Contents/version.plist")"
+          echo "Xcode $version ($build), $(python3 --version), $(openssl version)"
+          [ "$version ($build)" = "26.1.1 (17B100)" ]
+          mkdir apple-sdk
+          python3 reproducible/macos/gen-sdk.py "$xcode" \
+            -o apple-sdk/Xcode-26.1.1-17B100-extracted-SDK-with-libcxx-headers.tar > /dev/null
+          python3 reproducible/macos/gen-sdk-cryptexes.py "$xcode" \
+            -o apple-sdk/Xcode-26.1.1-17B100-extracted-SDK-cryptexes.tar
+          cd apple-sdk
+          awk '!/^#/ && $2 ~ /[.]tar$/' ../reproducible/macos/apple-sdk.sha256 | shasum -a 256 -c -
+
+      - name: Seal it for the cache
+        id: seal
+        env:
+          APPLE_SDK_CACHE_KEY: ${{ secrets.apple-sdk-cache-key }}
+        run: |
+          set -euo pipefail
+          python3 .github/apple-sdk-cache.py seal apple-sdk
+          ls -l apple-sdk
+          id="$(python3 .github/apple-sdk-cache.py key-id)"
+          random="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          [[ "$id" =~ ^[0-9a-f]{16}$ && "$random" =~ ^[0-9a-f]{32}$ ]]
+          echo "key=apple-sdk-$id-$GITHUB_RUN_ID-$random" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apple-sdk
+          key: ${{ steps.seal.outputs.key }}

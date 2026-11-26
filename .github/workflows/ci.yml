@@ -1,0 +1,202 @@
+name: CI
+
+# Every job runs on every push to main, every pull request, and on
+# demand (Actions, CI, Run workflow), except the Rust job on a pull
+# request of documentation and frontend files alone (the `changes` job).
+# The frontend and Rust jobs need the sibling gerfaut-core checkout, at
+# the revision .github/gerfaut-core.rev pins, the one a release compiles:
+# the Rust job builds against it, and the frontend tests read its
+# reference JSON (src/test/core.ts). gerfaut-core is public, no key reads
+# it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A pull request pushed again stops its previous run, which nobody will
+# merge. Every other run has a group of its own: GitHub would otherwise
+# drop a pending run on main when a newer one arrives.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Whether the Rust job has anything to check. On a pull request whose
+  # files are all documentation or frontend, listed below, it is skipped,
+  # and a skipped job counts as passed: nothing under src-tauri reads
+  # these files, and the frontend job still runs. Any other path, a push to
+  # main and a manual run, run it. Only an explicit `false` skips it: if
+  # this job fails or is cancelled, it still runs.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.paths.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The merge commit of the pull request and its first parent, the
+          # base branch: the diff between them is what the merge changes.
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Read the changed paths
+        id: paths
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          code=true
+          if [ "$EVENT" = pull_request ]; then
+            paths=$(git -c core.quotePath=false diff --name-only --no-renames HEAD^1 HEAD)
+            [ -z "$paths" ] || code=false
+            while IFS= read -r path; do
+              case "$path" in
+                README.md | CONTRIBUTING.md | SECURITY.md | TRADEMARK.md) ;;
+                LICENSE | .github/PULL_REQUEST_TEMPLATE.md) ;;
+                .github/ISSUE_TEMPLATE/*.yml | .github/ISSUE_TEMPLATE/*.md) ;;
+                .github/images/*.svg | .github/images/*.webp) ;;
+                .github/images/*.png | CHANGELOG.md) ;;
+                src/* | index.html | package.json | tsconfig.json) ;;
+                vite.config.ts | package-lock.json) ;;
+                *) code=true ;;
+              esac
+            done <<<"$paths"
+          fi
+          echo "code=$code" | tee -a "$GITHUB_OUTPUT"
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: gerfaut-desktop
+          persist-credentials: false
+
+      - name: Read the pinned gerfaut-core revision
+        id: core
+        run: echo "rev=$(cat gerfaut-desktop/.github/gerfaut-core.rev)" >> "$GITHUB_OUTPUT"
+
+      - name: Check the pinned revision is on gerfaut-core's main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REV: ${{ steps.core.outputs.rev }}
+        run: gerfaut-desktop/.github/core-on-main.sh "$REV"
+
+      # Only its reference JSON is read here: nothing of it runs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: gerfaut-dev/gerfaut-core
+          ref: ${{ steps.core.outputs.rev }}
+          path: gerfaut-core
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.19.0
+          cache: npm
+          cache-dependency-path: gerfaut-desktop/package-lock.json
+      - run: npm ci
+        working-directory: gerfaut-desktop
+      - name: Type check
+        working-directory: gerfaut-desktop
+        run: npx tsc -b
+      - name: Test
+        working-directory: gerfaut-desktop
+        run: npx vitest run
+      - name: Build
+        working-directory: gerfaut-desktop
+        run: npx vite build
+
+  rust:
+    # The image the release builds on, so a failure here is a failure the
+    # release would have hit too.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: gerfaut-desktop
+          persist-credentials: false
+
+      - name: Read the pinned gerfaut-core revision
+        id: core
+        run: echo "rev=$(cat gerfaut-desktop/.github/gerfaut-core.rev)" >> "$GITHUB_OUTPUT"
+
+      - name: Check the pinned revision is on gerfaut-core's main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REV: ${{ steps.core.outputs.rev }}
+        run: gerfaut-desktop/.github/core-on-main.sh "$REV"
+
+      # No credentials left in .git/config: some 800 crates run their
+      # build scripts and proc macros in the steps below.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: gerfaut-dev/gerfaut-core
+          ref: ${{ steps.core.outputs.rev }}
+          path: gerfaut-core
+          persist-credentials: false
+
+      # The list release.yml installs, for the same reason.
+      # apt-mirror.sh drops a mirror that serves its indexes but not its
+      # packages, which apt would otherwise wait on for hours; the timeout
+      # catches any other stall.
+      - name: Install Linux dependencies
+        timeout-minutes: 15
+        run: |
+          sudo apt-get update
+          gerfaut-desktop/.github/apt-mirror.sh
+          sudo apt-get install -y build-essential pkg-config curl wget file libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libdbus-1-dev xdg-utils
+
+      - name: Install the pinned Rust toolchain
+        working-directory: gerfaut-desktop
+        run: |
+          rustup toolchain install
+          rustc --version
+
+      # Its own cache key: this job builds the tree unoptimised and the
+      # release job builds it optimised, and one cache for both would be
+      # evicted and refilled on every run.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: gerfaut-desktop/src-tauri
+          key: clippy
+
+      # Cheap and first, as in gerfaut-core: an unformatted file that
+      # reaches main turns the next real diff into a wall of whitespace.
+      - name: Check formatting
+        working-directory: gerfaut-desktop/src-tauri
+        run: cargo fmt --check
+
+      # The frontend bundle is not needed to compile: what this checks is
+      # the Rust half, including the built-in Tor, which the desktop crate
+      # asks gerfaut-core for and which nothing else in CI compiles.
+      - name: Lint
+        working-directory: gerfaut-desktop/src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        working-directory: gerfaut-desktop/src-tauri
+        run: cargo test
+
+  # What scripts/sign-release.ps1 checks before it signs a release, on
+  # throwaway git repositories: no key, no network. Pester comes with
+  # the runner image.
+  signing-checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test
+        shell: pwsh
+        run: |
+          Import-Module Pester -MinimumVersion 5.5
+          Invoke-Pester -Path scripts -CI

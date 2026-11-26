@@ -1,0 +1,796 @@
+import { clsx } from "clsx";
+import {
+  Archive,
+  ArrowLeftRight,
+  ChevronRight,
+  Clock,
+  Coins,
+  Pencil,
+  Route,
+  Wallet,
+} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { Balance, ListAmount } from "../components/Amount";
+import { useCreditFor } from "../components/PriceCredit";
+import { BalanceChart } from "../components/BalanceChart";
+import { CoverageBadge } from "../components/CoverageBadge";
+import { SyncGlyph } from "../components/SyncIndicator";
+import { DirectionChip } from "../components/DirectionChip";
+import { LoadFailure } from "../components/LoadFailure";
+import { PAGE_TITLE_TEXT, PageHeader, PageTitle } from "../components/PageHeader";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import {
+  MASKED,
+  formatAmountSigned,
+  formatCurrency,
+  formatTimestamp,
+  groupThousands,
+  relativeTime,
+  truncateMiddle,
+  UNKNOWN,
+} from "../lib/format";
+import { isCommandError } from "../lib/ipc";
+import type { PriceRange, SyncStamp, TxSummary, WalletMeta, WalletSnapshot } from "../lib/ipc";
+import { policyDigest } from "../lib/policy";
+import { balanceSeries } from "../lib/series";
+import {
+  liveAnswer,
+  torDown,
+  usePriceHistory,
+  usePriceTable,
+  useRenameWallet,
+  useSnapshot,
+  useUtxos,
+  useWalletPolicy,
+} from "../state/queries";
+import { coverageOf, useLiveStatus, waitingWords } from "../state/live";
+import { useUi } from "../state/store";
+import { useNow } from "../state/clock";
+import { useWalletSync } from "../state/walletSync";
+import { failureOf, freshnessOf, isFirstSync } from "../lib/syncState";
+import type { Freshness } from "../lib/syncState";
+
+const RANGE_LABEL: Record<PriceRange, string> = {
+  day: "1D",
+  week: "1W",
+  month: "1M",
+  year: "1Y",
+  max: "Max",
+};
+
+/** Overview of one wallet: one fixed, glanceable dashboard — balance
+    and counts, the BTC price, watch status, the wallet's balance curve,
+    and its latest activity. Sized to the window, nothing to arrange. */
+export function HomeView({ walletId }: { walletId: string }) {
+  const snapshot = useSnapshot(walletId);
+  const sync = useWalletSync(walletId);
+  // The failure of this wallet's last sync, still said while it syncs
+  // again.
+  const failure = failureOf(sync);
+
+  if (snapshot.isPending) {
+    return <p className="py-4 font-ui text-sm text-muted">Loading wallet…</p>;
+  }
+  if (snapshot.isError || !snapshot.data) {
+    return (
+      <LoadFailure
+        what="This wallet"
+        error={snapshot.error}
+        retrying={snapshot.isFetching}
+        onRetry={() => void snapshot.refetch()}
+      />
+    );
+  }
+  const { meta } = snapshot.data;
+  // Nothing was fetched yet: a zero, a "never" and an empty list are
+  // not answers. The cards say they wait instead.
+  const firstSync = isFirstSync(sync, meta);
+
+  return (
+    // The page measures itself, not the window: the two columns hold
+    // down to the narrowest window with the sidebar open.
+    <div className="@container flex h-full min-h-[560px] flex-col pb-2">
+      {/* No freshness line here: Watch status carries it below. */}
+      <PageHeader heading={<WalletTitle key={meta.id} meta={meta} />} />
+
+      {/* On a narrow canvas the left column gives 40px to the right
+          one, where a date beside an amount was cut short. One column
+          only under the window's own minimum, where a tiling window
+          manager can put it. */}
+      <div className="flex min-h-0 flex-1 gap-4 @max-[640px]:flex-col">
+        <div className="flex w-[320px] shrink-0 flex-col gap-4 @max-[720px]:w-[280px] @max-[640px]:w-full">
+          <BalanceCard
+            snapshot={snapshot.data}
+            walletId={walletId}
+            error={failure}
+            firstSync={firstSync}
+          />
+          <PriceCard />
+          <ShortcutsCard />
+          <StatusCard
+            snapshot={snapshot.data}
+            error={failure}
+            syncing={sync.state === "syncing"}
+            reading={snapshot.isFetching}
+          />
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
+          <HistoryCard snapshot={snapshot.data} firstSync={firstSync} />
+          <ActivityCard snapshot={snapshot.data} firstSync={firstSync} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Card({
+  label,
+  children,
+  className,
+  action,
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+  action?: ReactNode;
+}) {
+  return (
+    <section
+      aria-label={label}
+      className={clsx("flex flex-col rounded-lg border border-border bg-surface p-5", className)}
+    >
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <p className="font-ui text-xs font-medium uppercase tracking-[0.04em] text-muted">
+          {label}
+        </p>
+        {action}
+      </div>
+      <div className="min-h-0 flex-1">{children}</div>
+    </section>
+  );
+}
+
+/** The title's box, the same whether it is read or edited. */
+const TITLE_BOX = "-mx-2 rounded-md border border-transparent px-2 py-0.5";
+
+/** The wallet's name, and the place to correct it: the title is a
+    button, the button becomes a field. Enter or leaving the field
+    saves a changed, non-empty name; Escape keeps the old one. What the
+    core refuses is said under the title in the muted voice — a name
+    is not a chain event, so never in red. */
+function WalletTitle({ meta }: { meta: WalletMeta }) {
+  const rename = useRenameWallet();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(meta.name);
+  const [error, setError] = useState<string | null>(null);
+  // The name the core accepted, shown until the snapshot says it too:
+  // the refetch trails the write by a frame, and neither the old name
+  // nor, when two renames follow each other, the one in between must
+  // flash back meanwhile.
+  const [accepted, setAccepted] = useState<string | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  // Enter, Escape and blur can all fire for one edit: the first counts.
+  const settled = useRef(false);
+  // Focus goes back to the title when the keyboard ended the edit, and
+  // stays where the pointer went when a click did.
+  const returnFocus = useRef(false);
+
+  const name = accepted ?? meta.name;
+
+  useEffect(() => {
+    if (accepted !== null && meta.name === accepted) setAccepted(null);
+  }, [meta.name, accepted]);
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    } else if (returnFocus.current) {
+      returnFocus.current = false;
+      buttonRef.current?.focus();
+    }
+  }, [editing]);
+
+  const begin = () => {
+    setDraft(name);
+    setError(null);
+    settled.current = false;
+    setEditing(true);
+  };
+
+  const close = () => {
+    returnFocus.current = document.activeElement === inputRef.current;
+    setEditing(false);
+  };
+
+  const finish = (save: boolean) => {
+    if (settled.current) return;
+    settled.current = true;
+    const next = draft.trim();
+    if (!save || next.length === 0 || next === name) {
+      close();
+      return;
+    }
+    rename.mutate(
+      { id: meta.id, name: next },
+      {
+        onSuccess: () => {
+          setAccepted(next);
+          close();
+        },
+        onError: (failure) => {
+          setError(isCommandError(failure) ? failure.message : String(failure));
+          close();
+        },
+      },
+    );
+  };
+
+  return (
+    <div>
+      {/* The heading stays whether it is read or edited: the page keeps
+          its title in the outline while the field is open. */}
+      <PageTitle aria-label={name}>
+        {editing ? (
+          <input
+            ref={inputRef}
+            autoComplete="off"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== "Escape") return;
+              // Closing hands focus to the title button, and the same
+              // key's press would then activate it and reopen the field.
+              event.preventDefault();
+              finish(event.key === "Enter");
+            }}
+            onBlur={() => finish(true)}
+            readOnly={rename.isPending}
+            aria-busy={rename.isPending || undefined}
+            aria-label="Wallet name"
+            className={clsx(
+              "field-focus selectable block w-full max-w-md bg-sunken",
+              PAGE_TITLE_TEXT,
+              TITLE_BOX,
+            )}
+          />
+        ) : (
+          <button
+            ref={buttonRef}
+            type="button"
+            onClick={begin}
+            aria-label={`Rename ${name}`}
+            className={clsx(
+              "group inline-flex max-w-full cursor-pointer items-center gap-2 text-left transition-colors duration-150",
+              "hover:bg-sunken/60 focus-visible:bg-sunken/60",
+              TITLE_BOX,
+            )}
+          >
+            <span className="truncate">{name}</span>
+            <Pencil
+              size={16}
+              strokeWidth={1.5}
+              aria-hidden
+              className="shrink-0 text-muted opacity-0 transition-opacity duration-150 group-hover:opacity-60 group-focus-visible:opacity-60"
+            />
+          </button>
+        )}
+      </PageTitle>
+      {error && (
+        <p role="status" className="mt-1 font-ui text-xs text-muted">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// --- left column --------------------------------------------------------
+
+/** The figure alone can lie: a wallet that never reached a backend shows
+    zero. The note says where the number comes from, and only then: a
+    balance with nothing to explain explains nothing. "All funds
+    confirmed" was the normal state announcing itself. */
+function balanceNote(meta: WalletMeta, error: string | null, firstSync: boolean): string | null {
+  if (error && !meta.last_sync) return "Sync failed: nothing fetched yet.";
+  if (error) return "Sync failed: showing the last known balance.";
+  if (firstSync) return "Syncing…";
+  if (!meta.last_sync) return "Not synced yet.";
+  return null;
+}
+
+/** What of the total is still moving: the signed sum of the
+    transactions not yet in a block, behind a clock. The total above
+    already counts it; this line says how much of it the chain has not
+    taken yet, and which way it is going. Amber is the colour of
+    waiting, and the sign and the glyph say it without the colour. */
+function PendingLine({ sats }: { sats: number }) {
+  const { masked, unit } = useUi();
+  const figure = masked ? MASKED : formatAmountSigned(sats, unit);
+  return (
+    <p className="mt-2 flex items-center gap-1.5 tabular text-[13px] font-medium text-pending">
+      <Clock size={13} strokeWidth={1.5} aria-hidden />
+      <span>{figure}</span>
+      <span className="sr-only">pending</span>
+    </p>
+  );
+}
+
+/** Where the balance goes, while there is none to print: the dash of a
+    figure nobody has, at the size of the figure, so the card keeps its
+    lines. The note under it says why. */
+function BalanceUnknown() {
+  return (
+    <div
+      aria-hidden
+      className="tabular text-2xl font-semibold leading-[1.1] tracking-[-0.02em] text-muted"
+    >
+      {UNKNOWN}
+    </div>
+  );
+}
+
+function BalanceCard({
+  snapshot,
+  walletId,
+  error,
+  firstSync,
+}: {
+  snapshot: WalletSnapshot;
+  walletId: string;
+  error: string | null;
+  firstSync: boolean;
+}) {
+  const utxos = useUtxos(walletId, true);
+  const policy = useWalletPolicy(walletId);
+  const { setView, masked } = useUi();
+  const { balance, meta } = snapshot;
+  const note = balanceNote(meta, error, firstSync);
+  // The policy in the grammar of the counts: "1 key", "2 of 3 keys",
+  // "Recovery in 142 days". Until it is in, the row is only its name.
+  const digest = policy.data ? policyDigest(policy.data) : { figure: "Policy", label: "" };
+  return (
+    <Card label="Total balance" className="flex-1">
+      <div className="flex h-full flex-col">
+        {firstSync && !masked ? <BalanceUnknown /> : <Balance sats={balance.total} />}
+        {note ? (
+          <p className="mt-2 font-ui text-xs text-muted">{note}</p>
+        ) : (
+          balance.pending_net_sats !== null && <PendingLine sats={balance.pending_net_sats} />
+        )}
+        <div className="flex-1" />
+        <div className="-mx-2 mt-3 border-t border-border/60 pt-2">
+          <LinkRow
+            icon={<Coins size={15} strokeWidth={1.5} aria-hidden />}
+            figure={
+              firstSync
+                ? UNKNOWN
+                : utxos.data
+                  ? groupThousands(String(utxos.data.length))
+                  : utxos.isError
+                    ? "—"
+                    : "…"
+            }
+            label={`UTXO${!firstSync && utxos.data?.length === 1 ? "" : "s"}`}
+            onClick={() => setView("utxos")}
+          />
+          <LinkRow
+            icon={<ArrowLeftRight size={15} strokeWidth={1.5} aria-hidden />}
+            figure={firstSync ? UNKNOWN : groupThousands(String(meta.cached.tx_count))}
+            label={`transaction${!firstSync && meta.cached.tx_count === 1 ? "" : "s"}`}
+            onClick={() => setView("transactions")}
+          />
+          <LinkRow
+            icon={<Route size={15} strokeWidth={1.5} aria-hidden />}
+            figure={digest.figure}
+            label={digest.label}
+            hint={policy.data ? "policy" : undefined}
+            onClick={() => setView("policy")}
+          />
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/** One glanceable line that leads to its page: a lead figure, a muted
+    tail, a chevron. Counts and the policy digest share it — both are
+    structure, not amounts, and stay visible in masked mode. */
+function LinkRow({
+  icon,
+  figure,
+  label,
+  hint,
+  onClick,
+}: {
+  icon: ReactNode;
+  figure: string;
+  label?: string;
+  /** Where the row leads, for a reader who cannot see the icon. */
+  hint?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors duration-150 hover:bg-sunken/60"
+    >
+      <span className="text-muted">{icon}</span>
+      <span className="font-ui text-[13px] text-text">
+        <span className="tabular font-medium">{figure}</span>
+        {label && (
+          <>
+            {" "}
+            <span className="text-muted">{label}</span>
+          </>
+        )}
+        {hint && <span className="sr-only">, {hint}</span>}
+      </span>
+      <ChevronRight
+        size={14}
+        strokeWidth={1.5}
+        aria-hidden
+        className="ml-auto text-muted opacity-60 transition-opacity duration-150 group-hover:opacity-100"
+      />
+    </button>
+  );
+}
+
+function PriceCard() {
+  const { fiatEnabled, fiatSource, fiatCurrency, priceRange, setPriceRange } = useUi();
+  // The ranges the source serves, as the core's table lists them. The
+  // compact widget offers no "max": a lifetime of price says nothing at
+  // a glance.
+  const table = usePriceTable().data;
+  const served = table?.sources.find((entry) => entry.source === fiatSource)?.ranges ?? [];
+  const ranges: PriceRange[] = served.filter((range) => range !== "max");
+  const range = ranges.includes(priceRange) ? priceRange : (ranges[0] ?? "month");
+  // Fiat off means silent: the card used to ask CoinGecko for a year of
+  // price at every launch whatever the setting said, which tells a
+  // third party this machine opened a bitcoin wallet just now.
+  // Asked once the ranges are known, so the range asked for is one the
+  // source serves, and the series is asked once.
+  const history = usePriceHistory(range, fiatEnabled && table !== undefined);
+  // A refresh that failed shows no price, like the amounts: the series
+  // before it stays in the cache, and its last point is not today's.
+  const answer = liveAnswer(history, fiatCurrency);
+  const points = answer?.points ?? [];
+  const first = points[0];
+  const last = points[points.length - 1];
+  // The price on screen is the source's: the screen credits it.
+  useCreditFor(fiatEnabled && last ? answer?.source : null);
+  const change = first && last ? ((last.rate - first.rate) / first.rate) * 100 : null;
+
+  if (!fiatEnabled) {
+    // No range to pick over a price nobody fetched: an empty card says
+    // what it would hold and what turns it on, and asks for nothing.
+    return (
+      <Card label="Bitcoin price">
+        <p className="font-ui text-sm text-muted">
+          Turn on fiat value in Settings to see the price.
+        </p>
+      </Card>
+    );
+  }
+
+  return (
+    <Card
+      label="Bitcoin price"
+      action={
+        <RadioGroup
+          aria-label="Price range"
+          value={range}
+          onValueChange={(next) => setPriceRange(next as PriceRange)}
+        >
+          {ranges.map((option) => (
+            <RadioGroupItem key={option} value={option} tone="quiet">
+              {RANGE_LABEL[option]}
+            </RadioGroupItem>
+          ))}
+        </RadioGroup>
+      }
+    >
+      {last ? (
+        <div className="flex flex-wrap items-center gap-2.5">
+          <span className="tabular text-[22px] font-semibold leading-tight text-text">
+            {formatCurrency(last.rate, fiatCurrency, { maximumFractionDigits: 0 })}
+          </span>
+          {change !== null && (
+            <span
+              className={clsx(
+                "tabular inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                change >= 0
+                  ? "border-confirmed/25 bg-confirmed-surface text-confirmed"
+                  : "border-alert/25 bg-alert-surface text-alert",
+              )}
+            >
+              {change >= 0 ? "+" : "−"}
+              {Math.abs(change).toFixed(1)}%
+            </span>
+          )}
+        </div>
+      ) : (
+        <p className="font-ui text-sm text-muted">
+          {!history.isError && !answer
+            ? "Loading…"
+            : torDown(history.error)
+              ? "Tor is not available, so no price was asked."
+              : "The price source did not answer."}
+        </p>
+      )}
+    </Card>
+  );
+}
+
+/** The two settings a watcher reaches for from the overview, as rows
+    that lead there: the backup, and the wallet list. Structure, not
+    amounts — visible in masked mode like the count rows above. */
+function ShortcutsCard() {
+  const { openSettings } = useUi();
+  return (
+    <Card label="Shortcuts">
+      <div className="-mx-2 -my-1">
+        <LinkRow
+          icon={<Archive size={15} strokeWidth={1.5} aria-hidden />}
+          figure="Backup & sync"
+          onClick={() => openSettings("backup")}
+        />
+        <LinkRow
+          icon={<Wallet size={15} strokeWidth={1.5} aria-hidden />}
+          figure="Manage wallets"
+          hint="rename, reorder, remove"
+          onClick={() => openSettings("wallets")}
+        />
+      </div>
+    </Card>
+  );
+}
+
+/** The value of the "Last sync" row. A first sync that runs has no
+    date yet, and "never" would be read as an answer. A failure leaves
+    the figures of the last good sync on screen: the row dates them
+    before it says the failure, so the age reads as the last sync's,
+    not the failure's. Every value is the same box, glyph or not: the
+    words carry the baseline, so a state that gains a glyph does not
+    move the rows under it. */
+function lastSyncValue(fresh: Freshness, now: number): ReactNode {
+  const ago = (stamp: SyncStamp, after = "") => (
+    <span className="tabular self-baseline">{`${relativeTime(stamp.at, now)}${after}`}</span>
+  );
+  switch (fresh.state) {
+    case "failed":
+      return (
+        <span className="inline-flex items-center gap-1">
+          {fresh.stamp && ago(fresh.stamp, " · ")}
+          <span className="flex text-pending">
+            <SyncGlyph state="failed" />
+          </span>
+          <span className="self-baseline text-pending">Sync failed</span>
+        </span>
+      );
+    case "stale":
+      return (
+        <span className="inline-flex items-center gap-1 text-pending">
+          <SyncGlyph state="stale" />
+          {ago(fresh.stamp)}
+        </span>
+      );
+    case "syncing":
+    case "fresh":
+      return (
+        <span className="inline-flex items-center gap-1">
+          {fresh.stamp ? ago(fresh.stamp) : <span className="self-baseline">Syncing…</span>}
+        </span>
+      );
+    case "never":
+      return (
+        <span className="inline-flex items-center gap-1">
+          <span className="self-baseline">never</span>
+        </span>
+      );
+  }
+}
+
+/** Where the watch stands: when it last reached a backend, which one,
+    and how far the chain had got. The action leads to the node
+    settings, where the backend is chosen. */
+function StatusCard({
+  snapshot,
+  error,
+  syncing,
+  reading,
+}: {
+  snapshot: WalletSnapshot;
+  /** The last failure, still said while a sync runs again. */
+  error: string | null;
+  syncing: boolean;
+  /** The snapshot is being read again. */
+  reading: boolean;
+}) {
+  const { openSettings } = useUi();
+  const now = useNow();
+  const syncingAll = useUi((state) => state.syncingAll !== null);
+  const { meta, tip_height } = snapshot;
+  // Said only while the live watch is short of room: with room for
+  // every address, every wallet is live and the row would say nothing.
+  const live = useLiveStatus();
+  const coverage = coverageOf(live.data?.status, meta.id);
+  // A failure is said while the next sync runs too, as under the
+  // balance: here it goes before the sync, not after it.
+  const fresh = freshnessOf(
+    {
+      stamp: meta.last_sync,
+      phase: error !== null ? "failed" : syncing ? "syncing" : "idle",
+      // See `SyncIndicator`: not old while the figures are read again.
+      settled: !reading && !syncingAll,
+    },
+    now,
+  );
+  const rows: { label: string; value: ReactNode; detail?: string }[] = [
+    {
+      label: "Last sync",
+      value: lastSyncValue(fresh, now),
+      // Why, under the row rather than behind a hover: the core states
+      // it in a sentence, and a sentence is read where it lands.
+      detail: error ?? undefined,
+    },
+    {
+      label: "Backend",
+      value: meta.last_sync ? (
+        <span className="font-data text-[12px]">{meta.last_sync.backend}</span>
+      ) : (
+        "—"
+      ),
+    },
+    {
+      label: "Block",
+      value:
+        tip_height > 0 ? (
+          <span className="tabular">{groupThousands(String(tip_height))}</span>
+        ) : (
+          "—"
+        ),
+    },
+    ...(coverage
+      ? [
+          {
+            label: "Live watch",
+            value: <CoverageBadge coverage={coverage} said={coverage.coverage !== "live"} />,
+            detail: coverage.coverage === "live" ? undefined : waitingWords(coverage),
+          },
+        ]
+      : []),
+  ];
+  return (
+    <Card
+      label="Watch status"
+      action={
+        <button
+          type="button"
+          onClick={() => openSettings("network")}
+          className="cursor-pointer rounded-md px-2 py-1 font-ui text-xs font-medium text-primary transition-colors duration-150 hover:bg-sunken"
+        >
+          Node settings →
+        </button>
+      }
+    >
+      <dl className="flex flex-col gap-2.5">
+        {rows.map((row) => (
+          <div
+            key={row.label}
+            className={clsx(
+              "flex items-baseline justify-between",
+              row.detail ? "flex-wrap gap-x-3 gap-y-1" : "gap-3",
+            )}
+          >
+            <dt className="font-ui text-xs text-muted">{row.label}</dt>
+            <dd className="min-w-0 truncate text-right font-ui text-[13px] text-text">
+              {row.value}
+            </dd>
+            {row.detail && (
+              <dd className="line-clamp-2 basis-full font-ui text-xs text-muted" title={row.detail}>
+                {row.detail}
+              </dd>
+            )}
+          </div>
+        ))}
+      </dl>
+    </Card>
+  );
+}
+
+// --- right column -------------------------------------------------------
+
+function HistoryCard({ snapshot, firstSync }: { snapshot: WalletSnapshot; firstSync: boolean }) {
+  const { masked, unit } = useUi();
+  const points = balanceSeries(snapshot.txs, snapshot.balance.total);
+  return (
+    <Card label="Balance history" className="min-h-[220px] flex-1">
+      {masked ? (
+        <p className="flex h-full items-center justify-center font-ui text-sm text-muted">
+          {MASKED} · amounts are hidden
+        </p>
+      ) : points.length < 2 ? (
+        <p className="flex h-full items-center justify-center font-ui text-sm text-muted">
+          {firstSync ? "Syncing…" : "Not enough history to chart yet."}
+        </p>
+      ) : (
+        <BalanceChart points={points} unit={unit} />
+      )}
+    </Card>
+  );
+}
+
+function ActivityCard({ snapshot, firstSync }: { snapshot: WalletSnapshot; firstSync: boolean }) {
+  const { selectTx, setView } = useUi();
+  const txs = snapshot.txs.slice(0, 5);
+  return (
+    <Card
+      label="Latest activity"
+      className="shrink-0"
+      action={
+        txs.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setView("transactions")}
+            className="cursor-pointer rounded-md px-2 py-1 font-ui text-xs font-medium text-primary transition-colors duration-150 hover:bg-sunken"
+          >
+            All transactions →
+          </button>
+        ) : undefined
+      }
+    >
+      {txs.length === 0 ? (
+        <p className="font-ui text-sm text-muted">
+          {firstSync
+            ? "Syncing…"
+            : "No transactions yet. Once this wallet sees activity on the chain, it shows up here."}
+        </p>
+      ) : (
+        <ul>
+          {txs.map((tx) => (
+            <ActivityRow key={tx.txid} tx={tx} onOpen={() => selectTx(tx.txid)} />
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+function ActivityRow({ tx, onOpen }: { tx: TxSummary; onOpen: () => void }) {
+  const incoming = tx.net_sats >= 0;
+  const pending = tx.status.state === "pending";
+  return (
+    <li className="border-b border-border/60 last:border-b-0">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-1 py-1.5 text-left transition-colors duration-100 hover:bg-sunken/60"
+      >
+        <DirectionChip incoming={incoming} pending={pending} size="sm" />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate font-ui text-[13px] text-text">
+            {incoming ? "Received" : "Sent"}
+          </span>
+          <span className="truncate text-[11px] text-muted">
+            {tx.status.state === "confirmed" && tx.status.timestamp ? (
+              <span className="tabular">{formatTimestamp(tx.status.timestamp)}</span>
+            ) : (
+              <span className="font-data">{truncateMiddle(tx.txid, 8, 8)}</span>
+            )}
+          </span>
+        </span>
+        <ListAmount sats={tx.net_sats} pending={pending} />
+        <ChevronRight
+          size={14}
+          strokeWidth={1.5}
+          aria-hidden
+          className="shrink-0 text-muted opacity-60 transition-opacity duration-150 group-hover:opacity-100"
+        />
+      </button>
+    </li>
+  );
+}
