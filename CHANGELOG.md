@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - In "Add a wallet", a line under "Import a file" says which files it reads: a descriptor, extended public key or address in a .txt or .desc file, a wallet export in .json, or a BSMS record in .bsms.
+- On the Broadcast page, a line under "Import a file" says which files it reads: a PSBT in .psbt, a signed transaction in .txn or .tx, or either one as text in .txt or .hex.
 - With an app lock set, Gerfaut locks again once you have been away: 5 minutes after your last key, click or scroll in its window, whether the window is in front or not. It used to stay unlocked until you closed it. "Lock when away" in Settings › Security sets the delay to Immediately, 1 min, 5 min or 15 min. Immediately also locks as soon as you switch windows. A file dialog that Gerfaut opens, or the QR scanner while its camera is on, does not count as time away.
 - A wallet can wear the shape of a signing device: the icon picker in Settings › Wallets has a Devices section with 25 drawings, from sticks and small screens to cards, keypads and self-built boards, beside the seven symbols. The picker is now a grid of eight, and the arrow keys move through it by row and column.
 - While its window is open and unlocked, Gerfaut syncs your wallets again every 10 minutes. It used to sync once at startup, then only when Live heard a transaction. A sync that fails is tried again 10 minutes later.

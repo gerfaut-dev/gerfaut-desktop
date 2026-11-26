@@ -17,7 +17,7 @@ import type {
 import { openFilePicker } from "../lib/excursion";
 import { NETWORK_LABEL } from "../lib/format";
 import { ipc, materialRefusal } from "../lib/ipc";
-import { WALLET_FILE_ACCEPT, WALLET_FILE_HINT } from "../lib/walletFiles";
+import { WALLET_FILE_ACCEPT, WALLET_FILE_HINT } from "../lib/importFiles";
 import { useAddWallet, useSetActiveNetwork, useSyncWallet } from "../state/queries";
 import { useUi } from "../state/store";
 

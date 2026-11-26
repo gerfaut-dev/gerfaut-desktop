@@ -21,7 +21,7 @@ import {
   Wallet as WalletIcon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useId, useReducer, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { clsx } from "clsx";
 import { AddressChip } from "../components/AddressChip";
@@ -53,6 +53,7 @@ import {
   isFalseProof,
 } from "../lib/ipc";
 import { openFilePicker } from "../lib/excursion";
+import { TRANSACTION_FILE_ACCEPT, TRANSACTION_FILE_HINT } from "../lib/importFiles";
 import { explorerTxUrl } from "../lib/explorer";
 import {
   MASKED,
@@ -320,7 +321,7 @@ export function BroadcastView({ network }: { network: Network }) {
       <input
         ref={fileRef}
         type="file"
-        accept=".psbt,.txn,.tx,.txt,.hex,text/plain,application/octet-stream"
+        accept={TRANSACTION_FILE_ACCEPT}
         className="hidden"
         onChange={(event) => {
           const file = event.target.files?.[0];
@@ -380,6 +381,7 @@ function InputCard({
   busy: boolean;
   error: InputRefusal | null;
 }) {
+  const fileHintId = useId();
   return (
     <div className="rounded-lg border border-border bg-surface p-6">
       <label
@@ -426,7 +428,12 @@ function InputCard({
       </div>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-2">
-          <Button variant="secondary" onClick={onImport} icon={FileUp}>
+          <Button
+            variant="secondary"
+            onClick={onImport}
+            icon={FileUp}
+            aria-describedby={fileHintId}
+          >
             Import a file
           </Button>
           <Button variant="secondary" onClick={onScan} icon={ScanLine}>
@@ -442,6 +449,11 @@ function InputCard({
           {busy ? "Reading…" : "Preview"}
         </Button>
       </div>
+      {/* Said before the picker opens, in sight: a tooltip would wait
+          for a hover a keyboard never makes. */}
+      <p id={fileHintId} className="mt-2 font-ui text-xs text-muted">
+        {TRANSACTION_FILE_HINT}
+      </p>
     </div>
   );
 }
