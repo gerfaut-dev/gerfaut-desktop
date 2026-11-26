@@ -125,6 +125,12 @@ export function BackendSection({
   const [host, setHost] = useState(initialElectrum.host);
   const [port, setPort] = useState(initialElectrum.port);
   const [tls, setTls] = useState(initialElectrum.tls);
+  // An empty form's switch follows the typed address, read the way a
+  // scanned one is, until the person sets it: then it is theirs. A
+  // stored server or a scan sets it too.
+  const [tlsFollows, setTlsFollows] = useState(seed.type !== "custom_electrum");
+  /** Why the address turned the switch off, while it stays so. */
+  const [tlsNote, setTlsNote] = useState<string | null>(null);
   // Read from the stored backend and sent back with every save: the
   // core leaves it out while off, so a form that rebuilt the config
   // without it would turn it off each time the address is saved.
@@ -177,12 +183,42 @@ export function BackendSection({
     setHost(electrum.host);
     setPort(electrum.port);
     setTls(electrum.tls);
+    setTlsFollows(config.type !== "custom_electrum");
+    setTlsNote(null);
     setOwnNode(isOwnNode(config));
     setOnion(false);
     // `shown` reads the store as it stands, and the settings through
     // these two: nothing else to follow.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [network, settings.backends]);
+
+  // The core reads host and port as it reads a scanned address with no
+  // scheme: a port that conventionally runs in the clear, or an onion,
+  // turns TLS off. An answer about an address since retyped is dropped,
+  // and so is one the core cannot read yet (a host half typed). A host
+  // with a scheme of its own answers for TLS in the port's place, and an
+  // IPv6 literal out of its brackets swallows the port: neither is read.
+  useEffect(() => {
+    if (!tlsFollows || !host.trim() || !port.trim() || host.includes("://")) return;
+    let stale = false;
+    ipc
+      .parseBackend(`${host.trim()}:${port.trim()}`)
+      .then((backend) => {
+        if (stale || backend.kind !== "electrum" || backend.port !== Number(port.trim())) return;
+        setTls(backend.tls);
+        setTlsNote(
+          backend.tls
+            ? null
+            : backend.onion
+              ? "TLS turned off: Tor already encrypts the connection to an onion server."
+              : `TLS turned off: port ${port.trim()} usually runs without it.`,
+        );
+      })
+      .catch(() => {});
+    return () => {
+      stale = true;
+    };
+  }, [host, port, tlsFollows]);
 
   const valid =
     kind === "public_esplora" ||
@@ -253,6 +289,8 @@ export function BackendSection({
       setHost(backend.host.includes(":") ? `[${backend.host}]` : backend.host);
       setPort(backend.port === null ? "" : String(backend.port));
       setTls(backend.tls);
+      setTlsFollows(false);
+      setTlsNote(null);
     } catch (error) {
       // Pointing the wrong QR at it is the likely slip, so the refusal
       // names what was read instead; a private key in this screen's words.
@@ -458,6 +496,8 @@ export function BackendSection({
               checked={tls}
               onChange={(on) => {
                 setTls(on);
+                setTlsFollows(false);
+                setTlsNote(null);
                 clearRefusal();
               }}
               label="Use TLS"
@@ -466,6 +506,10 @@ export function BackendSection({
           </div>
           <ScanButton onClick={() => setScanOpen(true)} />
         </div>
+        {/* Always there, so a change of words is announced. */}
+        <p aria-live="polite" className="mt-2 font-ui text-xs text-muted empty:hidden">
+          {tlsNote}
+        </p>
         <ScanRefusal reason={scanError} />
         {onion && <OnionNote />}
       </>

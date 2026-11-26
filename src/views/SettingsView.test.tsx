@@ -805,6 +805,118 @@ describe("testing the backend once saved", () => {
   });
 });
 
+describe("the TLS switch of a server typed by hand", () => {
+  /** The core's reading of an address with no scheme, as `parse_backend`
+      gives it: a conventional plain port, or an onion on any other one,
+      means no TLS; a name it cannot read yet is refused. */
+  function readLikeTheCore(input: string): ScannedBackend {
+    const colon = input.lastIndexOf(":");
+    const host = input.slice(0, colon);
+    const port = Number(input.slice(colon + 1));
+    if (!host.includes(".")) throw new Error(`${host} does not look like a server address`);
+    const onion = host.endsWith(".onion");
+    const tls = [50001, 60001, 20001, 50003].includes(port)
+      ? false
+      : [50002, 60002, 20002, 50004].includes(port)
+        ? true
+        : !onion;
+    return { kind: "electrum", url: `${tls ? "ssl" : "tcp"}://${input}`, host, port, tls, onion };
+  }
+
+  function mockReading() {
+    const read: string[] = [];
+    mockIPC((cmd, args) => {
+      if (cmd === "public_servers") return [];
+      if (cmd === "inspect_certificate") return { host: "", status: { type: "trusted" } };
+      if (cmd === "live_limits") return LIVE_LIMITS;
+      if (cmd === "parse_backend") {
+        const input = (args as { input: string }).input;
+        read.push(input);
+        try {
+          return readLikeTheCore(input);
+        } catch (error) {
+          return Promise.reject({ kind: "server", message: String(error) }) as never;
+        }
+      }
+      throw new Error(`unexpected command ${cmd}`);
+    });
+    return read;
+  }
+
+  /** An empty Electrum form: nothing of one's own stored yet. */
+  async function emptyForm(saved: BackendConfig[] = []) {
+    renderBackend((config) => saved.push(config), { ...SETTINGS, backends: {} });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("radio", { name: /my own electrum server/i }));
+    expect(toggle("Use TLS")).toHaveAttribute("aria-checked", "true");
+    return user;
+  }
+
+  async function typePort(user: ReturnType<typeof userEvent.setup>, port: string) {
+    await user.clear(field("Port"));
+    await user.type(field("Port"), port);
+  }
+
+  it("turns TLS off for an onion on the plain port, and says why", async () => {
+    const read = mockReading();
+    const saved: BackendConfig[] = [];
+    const user = await emptyForm(saved);
+    await user.type(field("Host"), "gerfautexample123.onion");
+    await typePort(user, "50001");
+
+    await waitFor(() => expect(toggle("Use TLS")).toHaveAttribute("aria-checked", "false"));
+    expect(
+      screen.getByText("TLS turned off: Tor already encrypts the connection to an onion server."),
+    ).toBeInTheDocument();
+    // Read by the core, as a scanned address with no scheme.
+    expect(read.at(-1)).toBe("gerfautexample123.onion:50001");
+
+    await user.click(screen.getByRole("button", { name: "Save backend" }));
+    expect(saved).toEqual([
+      { type: "custom_electrum", url: "tcp://gerfautexample123.onion:50001" },
+    ]);
+  });
+
+  it("follows the port back and forth, and names it", async () => {
+    mockReading();
+    const user = await emptyForm();
+    await user.type(field("Host"), "node.example.org");
+    await typePort(user, "50001");
+    await waitFor(() => expect(toggle("Use TLS")).toHaveAttribute("aria-checked", "false"));
+    expect(screen.getByText("TLS turned off: port 50001 usually runs without it.")).toBeInTheDocument();
+
+    await typePort(user, "50002");
+    await waitFor(() => expect(toggle("Use TLS")).toHaveAttribute("aria-checked", "true"));
+    expect(screen.queryByText(/TLS turned off/)).not.toBeInTheDocument();
+  });
+
+  it("never overrides a switch the person set", async () => {
+    mockReading();
+    const user = await emptyForm();
+    await user.type(field("Host"), "node.example.org");
+    await user.click(toggle("Use TLS"));
+    await user.click(toggle("Use TLS"));
+    await typePort(user, "50001");
+
+    // Nothing to wait for: the core is no longer asked.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(toggle("Use TLS")).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByText(/TLS turned off/)).not.toBeInTheDocument();
+  });
+
+  it("leaves the switch of a stored server as it was saved", async () => {
+    const read = mockReading();
+    renderBackend();
+    const user = userEvent.setup();
+    expect(field("Host")).toHaveValue("node.local");
+    await typePort(user, "50001");
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(toggle("Use TLS")).toHaveAttribute("aria-checked", "true");
+    expect(read).toEqual([]);
+  });
+});
+
 describe("scanning a server address", () => {
   it("fills the form from the one-liner a node prints", async () => {
     const calls = mockBackendIpc({
