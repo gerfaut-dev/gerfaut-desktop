@@ -2590,6 +2590,45 @@ describe("receive page", () => {
     expect(screen.queryByRole("button", { name: /new address/i })).not.toBeInTheDocument();
   });
 
+  /** The core has not kept it revealed, here because it failed: shown in
+      this visit, the address is still never offered as new. */
+  it("never offers an address shown in this visit, even when keeping it failed", async () => {
+    const core = revealingCore(0);
+    const tried: number[] = [];
+    walletIpc({
+      ...core.handlers,
+      reveal_receive_address: (args: Record<string, unknown>) => {
+        tried.push(Number(args.index));
+        if (Number(args.index) === 1) throw new Error("the vault is busy");
+        return core.handlers.reveal_receive_address(args);
+      },
+    });
+    const user = await openReceive();
+    await user.click(screen.getByRole("button", { name: /next address/i }));
+    await screen.findByText(/unused address · index 1/i);
+    await waitFor(() => expect(tried).toContain(1));
+    await user.click(screen.getByRole("button", { name: /first unused/i }));
+    await screen.findByText(/next unused address · index 0/i);
+
+    await user.click(await screen.findByRole("button", { name: /new address/i }));
+    expect(await screen.findByText(/unused address · index 2/i)).toBeInTheDocument();
+  });
+
+  /** A payment may free addresses within reach: once a sync has read the
+      wallet again, "New address" comes back. */
+  it("offers New address again after a sync", async () => {
+    walletIpc(revealingCore(10_000).handlers);
+    const user = await openReceive();
+    await user.click(await screen.findByRole("button", { name: /new address/i }));
+    await screen.findByText(/Every address within 200 of the first unused one/);
+
+    const sync = await sidebar().findByRole("button", { name: "Sync all" });
+    await waitFor(() => expect(sync).toBeEnabled());
+    await user.click(sync);
+    expect(await screen.findByRole("button", { name: /new address/i })).toBeInTheDocument();
+    expect(screen.queryByText(/Every address within 200/)).not.toBeInTheDocument();
+  });
+
   it("offers no next address for a descriptor that has only one", async () => {
     walletIpc({ receive_addresses: () => receiveEntries(0) });
     renderApp();

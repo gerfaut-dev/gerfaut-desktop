@@ -65,6 +65,13 @@ export function ReceiveView({ walletId }: { walletId: string }) {
   // Asked of the core once per wallet and index; a failure is asked
   // again the next time the address shows.
   const revealAsked = useRef(new Set<string>());
+  // Every address shown in this visit, by wallet and index: "New
+  // address" passes them over before the core has kept them revealed,
+  // and even if it failed to.
+  const shownHere = useRef(new Set<string>());
+  // When the page found none within reach: the wallet as it read then.
+  // A sync that moved the chain since may have freed new ones.
+  const noneSince = useRef(0);
   // One more than the one shown, so the page knows whether there is a
   // next one before "Next address" is pressed; as far as the core goes
   // while it looks for an address never shown.
@@ -101,9 +108,10 @@ export function ReceiveView({ walletId }: { walletId: string }) {
   // On screen: kept revealed. A single address has nothing to reveal
   // and says it was always given.
   useEffect(() => {
-    if (!entry || entry.revealed) return;
+    if (!entry) return;
     const key = `${walletId}:${entry.index}`;
-    if (revealAsked.current.has(key)) return;
+    shownHere.current.add(key);
+    if (entry.revealed || revealAsked.current.has(key)) return;
     revealAsked.current.add(key);
     keepRevealed(
       { id: walletId, index: entry.index },
@@ -115,16 +123,29 @@ export function ReceiveView({ walletId }: { walletId: string }) {
   // cached before it: the first address past this one never shown.
   // None within reach: the page stays, and says so.
   const current = settled && !addresses.isFetching;
+  const chainRead = snapshot.dataUpdatedAt;
   useEffect(() => {
     if (seek !== "seeking" || !current) return;
-    const fresh = entries.findIndex((candidate, at) => at > position && !candidate.revealed);
+    const fresh = entries.findIndex(
+      (candidate, at) =>
+        at > position &&
+        !candidate.revealed &&
+        !shownHere.current.has(`${walletId}:${candidate.index}`),
+    );
     if (fresh < 0) {
+      noneSince.current = chainRead;
       setSeek("none");
       return;
     }
     setSeek("idle");
     setOffset(fresh);
-  }, [seek, current, entries, position]);
+  }, [seek, current, entries, position, walletId, chainRead]);
+
+  // A sync read the wallet again since none was found: a payment may
+  // have freed addresses within reach, so "New address" comes back.
+  useEffect(() => {
+    if (seek === "none" && chainRead !== noneSince.current) setSeek("idle");
+  }, [seek, chainRead]);
 
   const moveTo = (next: number) => {
     setSeek("idle");
