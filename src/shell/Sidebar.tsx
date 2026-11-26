@@ -22,6 +22,7 @@ import {
 import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { DropLine, useDragReorder } from "../components/DragReorder";
+import { FullNameTooltip } from "../components/FullNameTooltip";
 import { SyncGlyph } from "../components/SyncIndicator";
 import { MASKED, NETWORK_LABEL, UNKNOWN, formatAmount, relativeTime } from "../lib/format";
 import type { Network, SyncStamp, WalletMeta } from "../lib/ipc";
@@ -483,51 +484,60 @@ function WalletSwitcher({
     );
   }
 
+  const switcher = (
+    <button
+      ref={buttonRef}
+      type="button"
+      onClick={() => setOpen(!open)}
+      aria-haspopup="menu"
+      aria-expanded={open}
+      title={collapsed ? (active ? active.name : "Switch wallet") : undefined}
+      aria-label={active ? `Wallet: ${active.name}` : "Switch wallet"}
+      className={clsx(
+        "flex w-full cursor-pointer items-center rounded-md bg-sunken/70",
+        "transition-colors duration-150 hover:bg-sunken",
+        collapsed ? "h-10 justify-center" : "gap-2.5 px-3 py-2",
+      )}
+    >
+      <span
+        aria-hidden
+        className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-surface text-primary"
+      >
+        {/* `data-icon` names the glyph for a test, which should not read
+            a class. */}
+        <ActiveGlyph size={15} strokeWidth={1.5} data-icon={active?.icon ?? "wallet"} />
+      </span>
+      {!collapsed && (
+        <>
+          <span className="flex min-w-0 flex-1 flex-col text-left">
+            <span data-full-name className="truncate font-ui text-sm font-medium text-text">
+              {active?.name ?? "Select a wallet"}
+            </span>
+            {active && (
+              <span className="tabular truncate text-[11px] text-muted">
+                {balanceOf(active)}
+              </span>
+            )}
+          </span>
+          <ChevronsUpDown
+            size={14}
+            strokeWidth={1.5}
+            aria-hidden
+            className="shrink-0 text-muted"
+          />
+        </>
+      )}
+    </button>
+  );
+
   return (
     <div ref={rootRef} className={clsx("relative", collapsed ? "px-2" : "px-3")}>
-      <button
-        ref={buttonRef}
-        type="button"
-        onClick={() => setOpen(!open)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title={collapsed ? (active ? active.name : "Switch wallet") : undefined}
-        aria-label={active ? `Wallet: ${active.name}` : "Switch wallet"}
-        className={clsx(
-          "flex w-full cursor-pointer items-center rounded-md bg-sunken/70",
-          "transition-colors duration-150 hover:bg-sunken",
-          collapsed ? "h-10 justify-center" : "gap-2.5 px-3 py-2",
-        )}
-      >
-        <span
-          aria-hidden
-          className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-surface text-primary"
-        >
-          {/* `data-icon` names the glyph for a test, which should not read
-              a class. */}
-          <ActiveGlyph size={15} strokeWidth={1.5} data-icon={active?.icon ?? "wallet"} />
-        </span>
-        {!collapsed && (
-          <>
-            <span className="flex min-w-0 flex-1 flex-col text-left">
-              <span className="truncate font-ui text-sm font-medium text-text">
-                {active?.name ?? "Select a wallet"}
-              </span>
-              {active && (
-                <span className="tabular truncate text-[11px] text-muted">
-                  {balanceOf(active)}
-                </span>
-              )}
-            </span>
-            <ChevronsUpDown
-              size={14}
-              strokeWidth={1.5}
-              aria-hidden
-              className="shrink-0 text-muted"
-            />
-          </>
-        )}
-      </button>
+      {/* Folded, the button's title names the wallet: no text to cut. */}
+      {active && !collapsed ? (
+        <FullNameTooltip name={active.name}>{switcher}</FullNameTooltip>
+      ) : (
+        switcher
+      )}
 
       {open && (
         <div
@@ -564,48 +574,50 @@ function WalletSwitcher({
                   dragging && "z-10 rounded-md bg-surface opacity-80",
                 )}
               >
-                <button
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={current}
-                  tabIndex={-1}
-                  onClick={() => {
-                    setOpen(false);
-                    openWallet(wallet.id);
-                  }}
-                  className={clsx(
-                    "flex w-full cursor-pointer items-center gap-2.5 rounded-md py-2 pl-2.5 text-left",
-                    "transition-colors duration-150 group-hover:bg-sunken/70",
-                    movable ? "pr-10" : "pr-2.5",
-                    current ? "bg-sunken/50" : undefined,
-                  )}
-                >
-                  <Glyph
-                    size={15}
-                    strokeWidth={1.5}
-                    aria-hidden
-                    data-icon={wallet.icon}
-                    className="shrink-0 text-muted"
-                  />
-                  {/* Two lines: the name gets the full width, the balance
-                      reads below it — names are the thing being chosen. */}
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate font-ui text-sm font-medium text-text">
-                      {wallet.name}
-                    </span>
-                    <span className="tabular truncate text-[11px] text-muted">
-                      {balanceOf(wallet)}
-                    </span>
-                  </span>
-                  {current && (
-                    <Check
-                      size={14}
-                      strokeWidth={2}
+                <FullNameTooltip name={wallet.name}>
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={current}
+                    tabIndex={-1}
+                    onClick={() => {
+                      setOpen(false);
+                      openWallet(wallet.id);
+                    }}
+                    className={clsx(
+                      "flex w-full cursor-pointer items-center gap-2.5 rounded-md py-2 pl-2.5 text-left",
+                      "transition-colors duration-150 group-hover:bg-sunken/70",
+                      movable ? "pr-10" : "pr-2.5",
+                      current ? "bg-sunken/50" : undefined,
+                    )}
+                  >
+                    <Glyph
+                      size={15}
+                      strokeWidth={1.5}
                       aria-hidden
-                      className="shrink-0 text-primary"
+                      data-icon={wallet.icon}
+                      className="shrink-0 text-muted"
                     />
-                  )}
-                </button>
+                    {/* Two lines: the name gets the full width, the balance
+                        reads below it — names are the thing being chosen. */}
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span data-full-name className="truncate font-ui text-sm font-medium text-text">
+                        {wallet.name}
+                      </span>
+                      <span className="tabular truncate text-[11px] text-muted">
+                        {balanceOf(wallet)}
+                      </span>
+                    </span>
+                    {current && (
+                      <Check
+                        size={14}
+                        strokeWidth={2}
+                        aria-hidden
+                        className="shrink-0 text-primary"
+                      />
+                    )}
+                  </button>
+                </FullNameTooltip>
                 {movable && (
                   // A 40px hand for a 14px glyph: the desktop minimum target.
                   <span
