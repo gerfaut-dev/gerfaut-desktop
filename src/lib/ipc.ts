@@ -689,7 +689,8 @@ export type BackendProblem =
 
 /** What testing the stored backend of a network found, mirroring
     `BackendCheck` in gerfaut-core. `host` is the server that answered,
-    or the last one tried: `host:port`, or a host alone. */
+    or the last one tried: `host:port`, or a host alone. `cancelled`:
+    stopped before it found anything, the backend saved all the same. */
 export type BackendCheck =
   | {
       outcome: "reached";
@@ -710,7 +711,8 @@ export type BackendCheck =
           the core knows it. */
       server_network: Network | null;
       tor: boolean;
-    };
+    }
+  | { outcome: "cancelled" };
 
 export type PriceSource = "mempool_space" | "coingecko";
 
@@ -1263,6 +1265,10 @@ export const ipc = {
   /** Tests the backend stored for `network`, as a sync reaches it.
       Through Tor it can take a couple of minutes. */
   checkBackend: (network: Network) => invoke<BackendCheck>("check_backend", { network }),
+  /** Stops the test of `network` under way, which answers cancelled:
+      whether one was running. */
+  cancelBackendCheck: (network: Network) =>
+    invoke<boolean>("cancel_backend_check", { network }),
   setGapLimit: (gapLimit: number) => invoke<void>("set_gap_limit", { gapLimit }),
   inspectCertificate: (url: string) => invoke<CertificateReport>("inspect_certificate", { url }),
   /** The backend and the certificate accepted for its Electrum server,

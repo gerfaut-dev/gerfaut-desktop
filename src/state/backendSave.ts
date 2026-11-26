@@ -51,13 +51,27 @@ export interface TestedBackend {
 }
 
 /** The test of a network's stored backend: under way, or what it found.
-    A test under way whose form changed since is `stale`: it still keeps
-    Save backend busy, and its answer is dropped. */
+    A test cancelled is done, with the core's `cancelled` answer. */
 export type BackendTest = TestedBackend &
-  ({ state: "testing"; run: number; stale: boolean } | { state: "done"; check: BackendCheck });
+  ({ state: "testing"; run: number } | { state: "done"; check: BackendCheck });
 
 /** Tells one test from the next, for the answer that lands late. */
 let runs = 0;
+
+/** The cancel of each network on its way to the core. A test started
+    meanwhile waits for it: sent first, the new test would be the one
+    it stopped. */
+const cancelling: Partial<Record<Network, Promise<unknown>>> = {};
+
+/** Stops the test of `network` in the core, its connections with it.
+    Nothing to say if that fails: the screen already let it go. */
+function cancelInCore(network: Network) {
+  const sent = ipc.cancelBackendCheck(network).catch(() => false);
+  cancelling[network] = sent;
+  void sent.then(() => {
+    if (cancelling[network] === sent) delete cancelling[network];
+  });
+}
 
 interface BackendSave {
   saving: BackendSaving | null;
@@ -115,20 +129,19 @@ export function clearBackendRefusal(network: Network) {
 
 /** Tests the backend stored for `network`, unless a test of it is
     already under way: one at a time per network. Its answer lands in
-    the store whatever page is open, unless a newer test or an edit of
-    the form took its place meanwhile. A command that fails says so as
-    a failed test, in its own words. */
+    the store whatever page is open, unless the test was cancelled, or
+    a newer one took its place, meanwhile. A command that fails says so
+    as a failed test, in its own words. */
 export async function testBackend(network: Network, backend: TestedBackend) {
   if (useBackendSave.getState().tests[network]?.state === "testing") return;
   const run = ++runs;
-  const put = (test: BackendTest | undefined) =>
-    useBackendSave.setState((state) => {
-      const tests = { ...state.tests };
-      if (test) tests[network] = test;
-      else delete tests[network];
-      return { tests };
-    });
-  put({ ...backend, state: "testing", run, stale: false });
+  const ours = () => {
+    const current = useBackendSave.getState().tests[network];
+    return current?.state === "testing" && current.run === run;
+  };
+  putTest(network, { ...backend, state: "testing", run });
+  await cancelling[network];
+  if (!ours()) return;
   const check: BackendCheck = await ipc.checkBackend(network).catch((error: unknown) => ({
     outcome: "failed" as const,
     host: "",
@@ -137,21 +150,38 @@ export async function testBackend(network: Network, backend: TestedBackend) {
     server_network: null,
     tor: false,
   }));
-  const current = useBackendSave.getState().tests[network];
-  if (current?.state !== "testing" || current.run !== run) return;
-  put(current.stale ? undefined : { ...backend, state: "done", check });
+  if (ours()) putTest(network, { ...backend, state: "done", check });
 }
 
-/** Takes back what the last test of `network` found: the form no
-    longer holds what it was about. A test under way runs to its end,
-    one at a time, and its answer is dropped. */
-export function clearBackendTest(network: Network) {
+function putTest(network: Network, test: BackendTest | undefined) {
   useBackendSave.setState((state) => {
-    const test = state.tests[network];
-    if (!test || (test.state === "testing" && test.stale)) return state;
     const tests = { ...state.tests };
-    if (test.state === "testing") tests[network] = { ...test, stale: true };
+    if (test) tests[network] = test;
     else delete tests[network];
     return { tests };
   });
+}
+
+/** Cancel: the test of `network` under way stops, in the core and on
+    screen at once, and says so. The backend stays saved, untested; the
+    answer still on its way is dropped. */
+export function cancelBackendTest(network: Network) {
+  const test = useBackendSave.getState().tests[network];
+  if (test?.state !== "testing") return;
+  putTest(network, {
+    protocol: test.protocol,
+    onion: test.onion,
+    state: "done",
+    check: { outcome: "cancelled" },
+  });
+  cancelInCore(network);
+}
+
+/** Takes back what the last test of `network` found, or stops the one
+    under way: the form no longer holds what it was about. */
+export function clearBackendTest(network: Network) {
+  const test = useBackendSave.getState().tests[network];
+  if (!test) return;
+  putTest(network, undefined);
+  if (test.state === "testing") cancelInCore(network);
 }

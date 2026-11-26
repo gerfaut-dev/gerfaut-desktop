@@ -1,7 +1,7 @@
 import { CircleCheck, LoaderCircle, ScanLine, Server } from "lucide-react";
 import { clsx } from "clsx";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref, RefObject } from "react";
 import { Button } from "../../components/Button";
 import { Modal } from "../../components/Modal";
 import { Notice } from "../../components/Notice";
@@ -12,6 +12,7 @@ import { NETWORK_LABEL, groupThousands } from "../../lib/format";
 import { PRIVATE_KEY_NOT_A_SERVER, ipc, isCommandError, materialRefusal } from "../../lib/ipc";
 import type { BackendCheck, BackendConfig, Network, PublicServer, Settings } from "../../lib/ipc";
 import {
+  cancelBackendTest,
   clearBackendRefusal,
   clearBackendTest,
   refuseBackend,
@@ -567,6 +568,7 @@ export function BackendSection({
           <BackendTestStatus
             network={network}
             test={test}
+            onCancel={() => cancelBackendTest(network)}
             onTestAgain={() => {
               saveButton.current?.focus();
               const stored = settings.backends[network] ?? { type: "public_esplora" };
@@ -816,15 +818,35 @@ function Host({ name }: { name: string }) {
 function BackendTestStatus({
   network,
   test,
+  onCancel,
   onTestAgain,
 }: {
   network: Network;
   test: BackendTest | undefined;
+  onCancel: () => void;
   onTestAgain: () => void;
 }) {
+  /** Cancel had the keyboard when it left: pressed, or the test ended
+      on its own. Test again, which takes its place, takes the focus. */
+  const handOver = useRef(false);
+  const testAgain = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    if (!handOver.current) return;
+    handOver.current = false;
+    testAgain.current?.focus();
+  }, [test]);
   return (
     <div role="status" aria-live="polite" className={clsx(!test && "sr-only")}>
-      {test && <TestOutcome network={network} test={test} onTestAgain={onTestAgain} />}
+      {test && (
+        <TestOutcome
+          network={network}
+          test={test}
+          onCancel={onCancel}
+          handOver={handOver}
+          onTestAgain={onTestAgain}
+          testAgain={testAgain}
+        />
+      )}
     </div>
   );
 }
@@ -832,33 +854,58 @@ function BackendTestStatus({
 function TestOutcome({
   network,
   test,
+  onCancel,
+  handOver,
   onTestAgain,
+  testAgain,
 }: {
   network: Network;
   test: BackendTest;
+  onCancel: () => void;
+  handOver: RefObject<boolean>;
   onTestAgain: () => void;
+  testAgain: Ref<HTMLButtonElement>;
 }) {
   if (test.state === "testing") {
     return (
-      <p className="mt-3 flex items-center gap-2 font-ui text-sm text-muted">
-        <LoaderCircle
-          size={16}
-          strokeWidth={1.5}
-          aria-hidden
-          className="shrink-0 motion-safe:animate-spin"
-        />
-        {test.onion
-          ? "Testing the connection through Tor. This can take a minute or two."
-          : "Testing the connection…"}
-      </p>
+      <div className="mt-3 flex max-w-xl items-center gap-3">
+        <p className="flex min-w-0 flex-1 items-center gap-2 font-ui text-sm text-muted">
+          <LoaderCircle
+            size={16}
+            strokeWidth={1.5}
+            aria-hidden
+            className="shrink-0 motion-safe:animate-spin"
+          />
+          {test.onion
+            ? "Testing the connection through Tor. This can take a minute or two."
+            : "Testing the connection…"}
+        </p>
+        <div className="shrink-0">
+          <CancelTest onCancel={onCancel} handOver={handOver} />
+        </div>
+      </div>
     );
   }
   const { check } = test;
   const again = (onTint: boolean) => (
-    <Button variant="secondary" size="sm" onTint={onTint} onClick={onTestAgain}>
+    <Button ref={testAgain} variant="secondary" size="sm" onTint={onTint} onClick={onTestAgain}>
       Test again
     </Button>
   );
+  if (check.outcome === "cancelled") {
+    // No colour and no icon: nothing went wrong, nothing was found.
+    return (
+      <div className="mt-3 flex max-w-xl items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="font-ui text-sm font-medium leading-5 text-text">Test cancelled</p>
+          <p className="mt-0.5 font-ui text-xs text-muted">
+            The backend is saved, but not tested.
+          </p>
+        </div>
+        <div className="shrink-0">{again(false)}</div>
+      </div>
+    );
+  }
   if (check.outcome === "reached") {
     return (
       <div className="mt-3 flex max-w-xl items-center gap-3">
@@ -888,6 +935,36 @@ function TestOutcome({
       </p>
       <p className="mt-0.5 text-pretty">{failureWords(check, test.protocol, network)}</p>
     </Notice>
+  );
+}
+
+/** Stops the test under way: the way out beside Save backend, busy
+    while it runs. Says in `handOver` whether it had the keyboard as it
+    left, read while its button is still on the page. */
+function CancelTest({
+  onCancel,
+  handOver,
+}: {
+  onCancel: () => void;
+  handOver: RefObject<boolean>;
+}) {
+  const button = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    const node = button.current;
+    return () => {
+      handOver.current = node !== null && node === document.activeElement;
+    };
+  }, [handOver]);
+  return (
+    <Button
+      ref={button}
+      variant="secondary"
+      size="sm"
+      aria-label="Cancel the connection test"
+      onClick={onCancel}
+    >
+      Cancel
+    </Button>
   );
 }
 
