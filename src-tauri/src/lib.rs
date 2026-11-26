@@ -893,7 +893,7 @@ async fn fetch_price_history(
 }
 
 /// The repository whose releases the app compares itself with.
-const RELEASES_REPO: &str = "gerfaut-wallet/gerfaut-desktop";
+const RELEASES_REPO: &str = "gerfaut-dev/gerfaut-desktop";
 
 /// The version this build runs, the one the core compares releases with.
 fn running_version(app: &tauri::AppHandle) -> String {

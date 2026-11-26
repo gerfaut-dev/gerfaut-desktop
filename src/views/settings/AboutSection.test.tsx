@@ -35,7 +35,7 @@ describe("the About card", () => {
 
       await user.click(screen.getByRole("button", { name: "Report a problem" }));
       expect(openLink).toHaveBeenCalledWith(ISSUES_URL);
-      expect(ISSUES_URL).toBe("https://github.com/gerfaut-wallet/gerfaut-desktop/issues");
+      expect(ISSUES_URL).toBe("https://github.com/gerfaut-dev/gerfaut-desktop/issues");
     },
   );
 

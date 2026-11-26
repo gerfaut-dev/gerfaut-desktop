@@ -17,7 +17,7 @@ export const BETA = APP_VERSION.startsWith("0.");
 
 /** Where a problem is reported: the issues of this repository, the one
     other address the About card opens. */
-export const ISSUES_URL = "https://github.com/gerfaut-wallet/gerfaut-desktop/issues";
+export const ISSUES_URL = "https://github.com/gerfaut-dev/gerfaut-desktop/issues";
 
 /** What Gerfaut sends and to whom, on the site. */
 export const PRIVACY_URL = "https://gerfaut-wallet.com/privacy";

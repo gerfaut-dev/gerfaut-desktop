@@ -27,7 +27,7 @@ import { useLock } from "./lock";
 
 /** Where a release is downloaded from. The one address the update
     notice and the About card ever open. */
-export const RELEASES_URL = "https://github.com/gerfaut-wallet/gerfaut-desktop/releases/latest";
+export const RELEASES_URL = "https://github.com/gerfaut-dev/gerfaut-desktop/releases/latest";
 
 /** How often an open window tells the core it is still open, so that
     a day gone by brings the next check. */

@@ -23,9 +23,9 @@
 use crate::{CommandError, CommandResult};
 
 /// The releases page: the update check and Settings › About send there.
-const RELEASES: &str = "https://github.com/gerfaut-wallet/gerfaut-desktop/releases/latest";
+const RELEASES: &str = "https://github.com/gerfaut-dev/gerfaut-desktop/releases/latest";
 /// The issues of this repository, behind "Report a problem".
-const ISSUES: &str = "https://github.com/gerfaut-wallet/gerfaut-desktop/issues";
+const ISSUES: &str = "https://github.com/gerfaut-dev/gerfaut-desktop/issues";
 /// The privacy policy on the site, behind its button in Settings › About.
 const PRIVACY: &str = "https://gerfaut-wallet.com/privacy";
 /// A transaction on the explorer, by network: one of these, then its
@@ -266,9 +266,9 @@ mod tests {
             &format!("https://mempool.space/regtest/tx/{TXID}"),
             "https://mempool.space/address/bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
             "https://github.com/someone/else/releases/latest",
-            "https://github.com/gerfaut-wallet/gerfaut-desktop/releases/latest/other",
-            "https://github.com/gerfaut-wallet/gerfaut-desktop/issues/new",
-            "https://github.com/gerfaut-wallet/gerfaut-desktop/issues?q=evil",
+            "https://github.com/gerfaut-dev/gerfaut-desktop/releases/latest/other",
+            "https://github.com/gerfaut-dev/gerfaut-desktop/issues/new",
+            "https://github.com/gerfaut-dev/gerfaut-desktop/issues?q=evil",
             "https://github.com/someone/else/issues",
             "https://gerfaut-wallet.com/",
             "https://gerfaut-wallet.com/privacy/evil",

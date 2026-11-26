@@ -17,7 +17,7 @@ vi.mock("../lib/links", () => ({
   },
 }));
 
-const RELEASES = "https://github.com/gerfaut-wallet/gerfaut-desktop/releases/latest";
+const RELEASES = "https://github.com/gerfaut-dev/gerfaut-desktop/releases/latest";
 const TX = `https://mempool.space/signet/tx/${"ab".repeat(32)}`;
 
 function Link({ url }: { url: string }) {
