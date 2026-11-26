@@ -252,6 +252,10 @@ export interface AddressEntry {
   /** Derivation path: absolute (`m/84'/1'/0'/0/5`) when unambiguous,
       keychain-relative otherwise; null for watched single addresses. */
   derivation: string | null;
+  /** Handed out before this list was asked for, by an earlier visit or
+      a sync: the first entry where it is false is an address nobody has
+      been given yet. Always true for a watched single address. */
+  revealed: boolean;
 }
 
 /** One row of the address audit list. */
@@ -1222,6 +1226,10 @@ export const ipc = {
   walletPolicy: (id: string) => invoke<PolicySnapshot>("wallet_policy", { id }),
   receiveAddresses: (id: string, lookahead: number) =>
     invoke<AddressEntry[]>("receive_addresses", { id, lookahead }),
+  /** Keeps the receive address at `index` revealed, with every one
+      before it: shown, it counts as handed out. */
+  revealReceiveAddress: (id: string, index: number) =>
+    invoke<null>("reveal_receive_address", { id, index }),
   addressList: (id: string) => invoke<AddressList>("address_list", { id }),
   /** Opens the save dialog itself; the rows written, or null when it
       was closed. */

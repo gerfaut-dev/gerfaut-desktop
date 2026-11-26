@@ -4,11 +4,12 @@ import {
   ChevronUp,
   Copy,
   Maximize2,
+  Plus,
   RotateCcw,
   SkipForward,
 } from "lucide-react";
 import { clsx } from "clsx";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { renderSVG } from "uqr";
 import { AddressChip } from "../components/AddressChip";
@@ -18,7 +19,12 @@ import { Modal } from "../components/Modal";
 import { Notice } from "../components/Notice";
 import { PageHeader } from "../components/PageHeader";
 import type { AddressEntry, AddressRow } from "../lib/ipc";
-import { useAddressList, useReceiveAddresses, useSnapshot } from "../state/queries";
+import {
+  useAddressList,
+  useRevealReceiveAddress,
+  useReceiveAddresses,
+  useSnapshot,
+} from "../state/queries";
 import { useClipboard } from "../state/clipboard";
 
 /** Rows each keychain shows before "Show all". */
@@ -48,18 +54,33 @@ export function unusedBefore(entries: AddressEntry[], position: number): number 
     show their one address and its one row. */
 export function ReceiveView({ walletId }: { walletId: string }) {
   const snapshot = useSnapshot(walletId);
-  // Skipping peeks further down the derivation path; nothing is
-  // retired, and a restart returns to the first unused address.
+  // Skipping looks further down the derivation path. Each address the
+  // page shows is kept revealed: shown, it counts as handed out, a sync
+  // watches it, and "New address" never offers it again.
   const [offset, setOffset] = useState(0);
+  // "New address": idle, looking through the upcoming addresses for one
+  // never shown, or found none within reach.
+  const [seek, setSeek] = useState<"idle" | "seeking" | "none">("idle");
+  const { mutate: keepRevealed } = useRevealReceiveAddress();
+  // Asked of the core once per wallet and index; a failure is asked
+  // again the next time the address shows.
+  const revealAsked = useRef(new Set<string>());
   // One more than the one shown, so the page knows whether there is a
-  // next one before "Next address" is pressed.
-  const addresses = useReceiveAddresses(walletId, Math.min(offset + 1, MAX_LOOKAHEAD));
+  // next one before "Next address" is pressed; as far as the core goes
+  // while it looks for an address never shown.
+  const addresses = useReceiveAddresses(
+    walletId,
+    seek === "seeking" ? MAX_LOOKAHEAD : Math.min(offset + 1, MAX_LOOKAHEAD),
+  );
   const list = useAddressList(walletId);
   const { copy: copyText, copied } = useClipboard();
   const [qrOpen, setQrOpen] = useState(false);
 
   // A wallet switch resets the peek: offsets are not comparable.
-  useEffect(() => setOffset(0), [walletId]);
+  useEffect(() => {
+    setOffset(0);
+    setSeek("idle");
+  }, [walletId]);
 
   const entries = addresses.data ?? [];
   // The list the core answered, not the one kept on screen while it
@@ -77,6 +98,38 @@ export function ReceiveView({ walletId }: { walletId: string }) {
     }
   }, [settled, entries.length, offset]);
 
+  // On screen: kept revealed. A single address has nothing to reveal
+  // and says it was always given.
+  useEffect(() => {
+    if (!entry || entry.revealed) return;
+    const key = `${walletId}:${entry.index}`;
+    if (revealAsked.current.has(key)) return;
+    revealAsked.current.add(key);
+    keepRevealed(
+      { id: walletId, index: entry.index },
+      { onError: () => revealAsked.current.delete(key) },
+    );
+  }, [entry, walletId, keepRevealed]);
+
+  // The long list is in, the one asked after the press and not one
+  // cached before it: the first address past this one never shown.
+  // None within reach: the page stays, and says so.
+  const current = settled && !addresses.isFetching;
+  useEffect(() => {
+    if (seek !== "seeking" || !current) return;
+    const fresh = entries.findIndex((candidate, at) => at > position && !candidate.revealed);
+    if (fresh < 0) {
+      setSeek("none");
+      return;
+    }
+    setSeek("idle");
+    setOffset(fresh);
+  }, [seek, current, entries, position]);
+
+  const moveTo = (next: number) => {
+    setSeek("idle");
+    setOffset(next);
+  };
   const singleAddress = snapshot.data?.meta.kind.type === "single_address";
   const gapLimit = snapshot.data?.meta.gap_limit ?? 20;
   const gap = entry ? unusedBefore(entries, position) : 0;
@@ -175,19 +228,39 @@ export function ReceiveView({ walletId }: { walletId: string }) {
                         <Button
                           variant="secondary"
                           disabled={!hasNext}
-                          onClick={() => setOffset(position + 1)}
+                          onClick={() => moveTo(position + 1)}
                           icon={SkipForward}
                         >
                           Next address
                         </Button>
+                        {/* Shown on an address handed out before: the
+                            page starts at the oldest unused one, which
+                            may already sit in someone's records. Not
+                            where the page can go no further. */}
+                        {entry.revealed && hasNext && seek !== "none" && (
+                          <Button
+                            variant="secondary"
+                            busy={seek === "seeking"}
+                            onClick={() => setSeek("seeking")}
+                            icon={Plus}
+                          >
+                            New address
+                          </Button>
+                        )}
                         {offset > 0 && (
-                          <Button variant="secondary" onClick={() => setOffset(0)} icon={RotateCcw}>
+                          <Button variant="secondary" onClick={() => moveTo(0)} icon={RotateCcw}>
                             First unused
                           </Button>
                         )}
                       </>
                     )}
                   </div>
+                  {seek === "none" && (
+                    <p role="status" className="font-ui text-xs text-muted">
+                      Every address within {MAX_LOOKAHEAD} of the first unused one was shown
+                      before. Use one of them, or wait for a payment to free the next ones.
+                    </p>
+                  )}
                   {/* Why "Next address" stopped: a hint, since nothing is
                       at stake. */}
                   {!singleAddress && settled && !hasNext && (

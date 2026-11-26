@@ -461,6 +461,18 @@ async fn receive_addresses(
         .await?)
 }
 
+/// The receive address the Receive page shows, kept revealed with every
+/// one before it: shown, it counts as handed out.
+#[tauri::command]
+async fn reveal_receive_address(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    index: u32,
+) -> CommandResult<()> {
+    state.unlocked()?;
+    Ok(state.manager.reveal_receive_address(&id, index).await?)
+}
+
 /// A sync asked for by hand. What it found is claimed and announced
 /// from here, through the record the live watch uses, so nothing is
 /// said twice.
@@ -1469,6 +1481,7 @@ pub fn run() {
             utxos,
             wallet_policy,
             receive_addresses,
+            reveal_receive_address,
             address_list,
             export_transactions_csv,
             public_servers,

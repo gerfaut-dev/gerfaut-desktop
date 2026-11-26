@@ -330,6 +330,21 @@ export function useSyncAll(): (network: Network, how?: { quiet?: boolean }) => v
   );
 }
 
+/** Keeps a shown receive address revealed. The upcoming addresses and
+    the audit list both change: it now counts as handed out. */
+export function useRevealReceiveAddress() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, index }: { id: string; index: number }) =>
+      ipc.revealReceiveAddress(id, index),
+    onSuccess: (_answer, { id }) =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: keys.receive(id) }),
+        client.invalidateQueries({ queryKey: ["addresses", id] }),
+      ]),
+  });
+}
+
 export function useAddressList(id: string | null) {
   return useQuery({
     queryKey: ["addresses", id ?? "none"],

@@ -551,12 +551,15 @@ const PUBLIC_SERVERS = [
   },
 ];
 
-function receiveEntries(lookahead: number): AddressEntry[] {
+/** `revealedUpTo`: the last index handed out before, by an earlier
+    visit or a sync; none by default, as for a wallet just added. */
+function receiveEntries(lookahead: number, revealedUpTo = -1): AddressEntry[] {
   return Array.from({ length: lookahead + 1 }, (_, index) => ({
     index,
     address: `tb1qexampleaddress${index}xxxxxxxxxxxxxxxxxxxx`,
     used: false,
     derivation: `m/84'/1'/0'/0/${index}`,
+    revealed: index <= revealedUpTo,
   }));
 }
 
@@ -612,6 +615,8 @@ function walletIpc(
         ];
       case "receive_addresses":
         return receiveEntries(Number(payload.lookahead ?? 0));
+      case "reveal_receive_address":
+        return null;
       // The address is read before it is saved; these tests type good
       // ones.
       case "parse_backend":
@@ -2497,6 +2502,94 @@ describe("receive page", () => {
     ).toBeInTheDocument();
   });
 
+  /** A core that remembers what it revealed, as the vault does: each
+      address the page shows is kept revealed with every one before it. */
+  function revealingCore(lastRevealed: number) {
+    let last = lastRevealed;
+    const kept: number[] = [];
+    return {
+      kept,
+      handlers: {
+        receive_addresses: (args: Record<string, unknown>) =>
+          receiveEntries(Number(args.lookahead ?? 0), last),
+        reveal_receive_address: (args: Record<string, unknown>) => {
+          const index = Number(args.index);
+          kept.push(index);
+          last = Math.max(last, index);
+          return null;
+        },
+      },
+    };
+  }
+
+  async function openReceive() {
+    renderApp();
+    const user = userEvent.setup();
+    await screen.findByText("Bitcoin price");
+    await user.click(sidebar().getByRole("button", { name: "Receive" }));
+    await screen.findByText(/next unused address · index 0/i);
+    return user;
+  }
+
+  /** Shown, an address counts as handed out: the core keeps it, and only
+      then does the page offer a newer one. */
+  it("keeps each shown address revealed", async () => {
+    const core = revealingCore(-1);
+    walletIpc(core.handlers);
+    const user = await openReceive();
+    await waitFor(() => expect(core.kept).toContain(0));
+    expect(await screen.findByRole("button", { name: /new address/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /next address/i }));
+    await screen.findByText(/unused address · index 1/i);
+    await waitFor(() => expect(core.kept).toContain(1));
+  });
+
+  /** The page starts at the oldest unused address, which an earlier
+      visit may already have handed out: "New address" goes to the first
+      one never shown, a newer one each time. */
+  it("moves to the first address never shown, a newer one each time", async () => {
+    walletIpc(revealingCore(3).handlers);
+    const user = await openReceive();
+
+    await user.click(await screen.findByRole("button", { name: /new address/i }));
+    expect(await screen.findByText(/unused address · index 4/i)).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /new address/i }));
+    expect(await screen.findByText(/unused address · index 5/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /first unused/i }));
+    expect(await screen.findByText(/next unused address · index 0/i)).toBeInTheDocument();
+  });
+
+  /** An address looked at with "Next address" may have been copied and
+      given: "New address" never offers it again. */
+  it("never offers an address seen with Next address as new", async () => {
+    const core = revealingCore(0);
+    walletIpc(core.handlers);
+    const user = await openReceive();
+    await user.click(screen.getByRole("button", { name: /next address/i }));
+    await screen.findByText(/unused address · index 1/i);
+    await waitFor(() => expect(core.kept).toContain(1));
+    await user.click(screen.getByRole("button", { name: /first unused/i }));
+    await screen.findByText(/next unused address · index 0/i);
+
+    await user.click(await screen.findByRole("button", { name: /new address/i }));
+    expect(await screen.findByText(/unused address · index 2/i)).toBeInTheDocument();
+  });
+
+  /** Every address within reach was shown before: the page stays where
+      it is rather than land on one already given, and says why. */
+  it("stays and says so when every address within reach was shown", async () => {
+    walletIpc(revealingCore(10_000).handlers);
+    const user = await openReceive();
+    await user.click(await screen.findByRole("button", { name: /new address/i }));
+    expect(
+      await screen.findByText(/Every address within 200 of the first unused one was shown before/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/next unused address · index 0/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /new address/i })).not.toBeInTheDocument();
+  });
+
   it("offers no next address for a descriptor that has only one", async () => {
     walletIpc({ receive_addresses: () => receiveEntries(0) });
     renderApp();
@@ -2523,7 +2616,7 @@ describe("receive page", () => {
       list_wallets: () => [single],
       wallet_snapshot: () => ({ ...SNAPSHOT, meta: single }),
       receive_addresses: () => [
-        { index: 0, address: "tb1qwatchedonly", used: true, derivation: null },
+        { index: 0, address: "tb1qwatchedonly", used: true, derivation: null, revealed: true },
       ],
     });
     renderApp();

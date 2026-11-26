@@ -201,6 +201,7 @@ const addressEntry = object<ipc.AddressEntry>("AddressEntry")({
   address: str,
   used: bool,
   derivation: nullable(str),
+  revealed: bool,
 });
 const addressRow = object<ipc.AddressRow>("AddressRow")({ index: num, address: str, used: bool, balance_sats: num });
 const addressList = object<ipc.AddressList>("AddressList")({

@@ -8,6 +8,7 @@ function at(...indexes: number[]): AddressEntry[] {
     address: `tb1qaddress${index}`,
     used: false,
     derivation: null,
+    revealed: false,
   }));
 }
 
