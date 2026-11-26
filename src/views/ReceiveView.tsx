@@ -65,10 +65,17 @@ export function ReceiveView({ walletId }: { walletId: string }) {
   // Asked of the core once per wallet and index; a failure is asked
   // again the next time the address shows.
   const revealAsked = useRef(new Set<string>());
-  // Every address shown in this visit, by wallet and index: "New
-  // address" passes them over before the core has kept them revealed,
-  // and even if it failed to.
-  const shownHere = useRef(new Set<string>());
+  // The address on screen, by wallet and index, and whether it was
+  // shown before it got there: revealed by an earlier visit or a sync,
+  // or seen earlier in this visit. Read once, on arrival: the page
+  // reveals the address it shows, and that must not count. `shown`
+  // holds every address of this visit: "New address" passes them over
+  // before the core has kept them revealed, and even if it failed to.
+  const [visit, setVisit] = useState<{
+    shown: ReadonlySet<string>;
+    onScreen: string | null;
+    shownBefore: boolean;
+  }>({ shown: new Set(), onScreen: null, shownBefore: false });
   // When the page found none within reach: the wallet as it read then.
   // A sync that moved the chain since may have freed new ones.
   const noneSince = useRef(0);
@@ -105,12 +112,22 @@ export function ReceiveView({ walletId }: { walletId: string }) {
     }
   }, [settled, entries.length, offset]);
 
+  // An address arrives on screen: whether it was shown before is read
+  // now, from the list that brought it, before the page reveals it.
+  const onScreen = entry ? `${walletId}:${entry.index}` : null;
+  if (entry && onScreen !== visit.onScreen) {
+    setVisit({
+      shown: new Set(visit.shown).add(onScreen!),
+      onScreen,
+      shownBefore: entry.revealed || visit.shown.has(onScreen!),
+    });
+  }
+
   // On screen: kept revealed. A single address has nothing to reveal
   // and says it was always given.
   useEffect(() => {
     if (!entry) return;
     const key = `${walletId}:${entry.index}`;
-    shownHere.current.add(key);
     if (entry.revealed || revealAsked.current.has(key)) return;
     revealAsked.current.add(key);
     keepRevealed(
@@ -130,7 +147,7 @@ export function ReceiveView({ walletId }: { walletId: string }) {
       (candidate, at) =>
         at > position &&
         !candidate.revealed &&
-        !shownHere.current.has(`${walletId}:${candidate.index}`),
+        !visit.shown.has(`${walletId}:${candidate.index}`),
     );
     if (fresh < 0) {
       noneSince.current = chainRead;
@@ -139,7 +156,7 @@ export function ReceiveView({ walletId }: { walletId: string }) {
     }
     setSeek("idle");
     setOffset(fresh);
-  }, [seek, current, entries, position, walletId, chainRead]);
+  }, [seek, current, entries, position, walletId, chainRead, visit.shown]);
 
   // A sync read the wallet again since none was found: a payment may
   // have freed addresses within reach, so "New address" comes back.
@@ -152,6 +169,10 @@ export function ReceiveView({ walletId }: { walletId: string }) {
     setOffset(next);
   };
   const singleAddress = snapshot.data?.meta.kind.type === "single_address";
+  // A watched address, or a descriptor with no wildcard, has one address
+  // to give, always the one shown before: nothing to warn about.
+  const oneAddress = singleAddress || (settled && entries.length === 1);
+  const shownBefore = !oneAddress && visit.onScreen === onScreen && visit.shownBefore;
   const gapLimit = snapshot.data?.meta.gap_limit ?? 20;
   const gap = entry ? unusedBefore(entries, position) : 0;
 
@@ -225,6 +246,19 @@ export function ReceiveView({ walletId }: { walletId: string }) {
                     )}
                   </div>
 
+                  {/* Still the first address nobody paid, so still the one
+                      offered: whoever was shown it may have kept it. Shown
+                      here, or revealed by a sync because an address after
+                      it was paid, in which case another wallet likely
+                      showed it: "may". The choice is the user's, so
+                      amber, and no block. */}
+                  {shownBefore && (
+                    <Notice tone="info">
+                      This address may have been shown before. Make sure it was not already
+                      used or given to someone.
+                    </Notice>
+                  )}
+
                   {/* A convention other software follows, not a risk to
                       funds or privacy: amber, and the info glyph. */}
                   {!singleAddress && gap >= gapLimit && (
@@ -254,11 +288,11 @@ export function ReceiveView({ walletId }: { walletId: string }) {
                         >
                           Next address
                         </Button>
-                        {/* Shown on an address handed out before: the
-                            page starts at the oldest unused one, which
-                            may already sit in someone's records. Not
-                            where the page can go no further. */}
-                        {entry.revealed && hasNext && seek !== "none" && (
+                        {/* With the note: the way to an address nobody
+                            was shown, for whoever would rather not use
+                            this one. Not where the page can go no
+                            further. */}
+                        {shownBefore && hasNext && seek !== "none" && (
                           <Button
                             variant="secondary"
                             busy={seek === "seeking"}
