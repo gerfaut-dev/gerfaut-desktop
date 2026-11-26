@@ -90,12 +90,6 @@ export function ReceiveView({ walletId }: { walletId: string }) {
   const { copy: copyText, copied } = useClipboard();
   const [qrOpen, setQrOpen] = useState(false);
 
-  // A wallet switch resets the peek: offsets are not comparable.
-  useEffect(() => {
-    setOffset(0);
-    setSeek("idle");
-  }, [walletId]);
-
   const entries = addresses.data ?? [];
   // The list the core answered, not the one kept on screen while it
   // was asked: only that one says where the upcoming addresses end.
