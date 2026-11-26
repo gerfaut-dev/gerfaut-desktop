@@ -13,7 +13,7 @@ async function openPicker(value: WalletIconId = "wallet") {
   const onChoose = vi.fn();
   render(<WalletIconPicker name="Cold storage" value={value} onChoose={onChoose} />);
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: "Icon" }));
+  await user.click(screen.getByRole("button", { name: "Change icon of Cold storage" }));
   return { user, onChoose, group: screen.getByRole("radiogroup", { name: "Icon of Cold storage" }) };
 }
 
@@ -84,7 +84,7 @@ describe("WalletIconPicker", () => {
     expect(first).toHaveAccessibleName("Swivel key");
     expect(onChoose.mock.calls).toEqual([["swivel_key"]]);
     expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Icon" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Change icon of Cold storage" })).toHaveFocus();
 
     // Opened on that icon, the picker marks it and starts there.
     cleanup();
@@ -109,6 +109,23 @@ describe("WalletIconPicker", () => {
     expect(group).not.toHaveClass("top-full");
     // It fits above: nothing is cut.
     expect(group.style.maxHeight).toBe("");
+  });
+
+  it("opens under the icon and from its left edge when the icon starts the row", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      // The icon near the left of a wide settings page, room below it.
+      const at = this.getAttribute("aria-expanded") !== null || this.querySelector("[aria-expanded]");
+      return at
+        ? ({ top: 200, bottom: 232, left: 300, right: 332, width: 32, height: 32, x: 300, y: 200 } as DOMRect)
+        : ({ top: 0, bottom: 800, left: 240, right: 1280, width: 1040, height: 800, x: 240, y: 0 } as DOMRect);
+    });
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(300);
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(362);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(800);
+    const { group } = await openPicker();
+    expect(group).toHaveClass("top-full");
+    expect(group).toHaveClass("left-0");
+    expect(group).not.toHaveClass("right-0");
   });
 
   it("is cut to the larger side and scrolls when neither side holds it", async () => {

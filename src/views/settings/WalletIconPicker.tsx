@@ -1,10 +1,13 @@
-import { Shapes } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { clsx } from "clsx";
-import { Button } from "../../components/Button";
 import type { WalletIconId } from "../../lib/ipc";
-import { WALLET_ICON, WALLET_ICON_LABEL, WALLET_ICON_SECTIONS } from "../../lib/walletIcons";
+import {
+  WALLET_ICON,
+  WALLET_ICON_LABEL,
+  WALLET_ICON_SECTIONS,
+  walletGlyph,
+} from "../../lib/walletIcons";
 
 /** Tiles in a row of the grid, in every section. */
 const COLUMNS = 8;
@@ -53,11 +56,11 @@ function visibleBounds(node: HTMLElement): { top: number; bottom: number; left: 
   return bounds;
 }
 
-/** The Icon action of a wallet row and the popover it opens: the icons
-    in a grid of eight, under two section titles, the current one marked.
-    Arrow keys move, Enter and Space choose, Escape, Tab and a click
-    outside close, and focus returns to the action. The popover opens
-    under the action, or above it when there is no room below. */
+/** A wallet row's icon, which opens the popover that changes it: the
+    icons in a grid of eight, under two section titles, the current one
+    marked. Arrow keys move, Enter and Space choose, Escape, Tab and a
+    click outside close, and focus returns to the icon. The popover opens
+    under the icon, or above it when there is no room below. */
 export function WalletIconPicker({
   name,
   value,
@@ -77,6 +80,7 @@ export function WalletIconPicker({
   const rootRef = useRef<HTMLDivElement>(null);
   const groupRef = useRef<HTMLDivElement>(null);
   const groupId = useId();
+  const Glyph = walletGlyph(value);
 
   const close = (refocus: boolean) => {
     setOpen(false);
@@ -154,18 +158,31 @@ export function WalletIconPicker({
   };
 
   return (
-    <div ref={rootRef} className="relative">
-      <Button
-        variant="secondary"
-        size="sm"
+    <div ref={rootRef} className="relative shrink-0">
+      {/* The icon itself opens the picker: changed where it is seen.
+          A 40px target around the 32px tile, which keeps its place. */}
+      <button
+        type="button"
         disabled={disabled}
         aria-expanded={open}
         aria-controls={open ? groupId : undefined}
+        aria-label={`Change icon of ${name}`}
+        title="Change icon"
         onClick={() => setOpen(!open)}
-        icon={Shapes}
+        className="group/icon -m-1 inline-flex shrink-0 cursor-pointer rounded-lg p-1 disabled:cursor-default disabled:opacity-40"
       >
-        Icon
-      </Button>
+        <span
+          className={clsx(
+            "inline-flex size-8 items-center justify-center rounded-md bg-sunken",
+            "transition-colors duration-150 ease-out",
+            open
+              ? "text-primary ring-2 ring-inset ring-primary"
+              : "text-text group-enabled/icon:group-hover/icon:text-primary",
+          )}
+        >
+          <Glyph size={16} strokeWidth={1.5} aria-hidden data-icon={value} />
+        </span>
+      </button>
       {open && (
         <div
           ref={groupRef}

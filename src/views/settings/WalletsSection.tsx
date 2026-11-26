@@ -163,7 +163,6 @@ export function WalletsSection({
           <ul ref={drag.listRef} className="flex flex-col gap-2">
             {shown.map((wallet, index) => {
               const single = wallet.kind.type === "single_address";
-              const Glyph = walletGlyph(wallet.icon);
               const coverage = coverageOf(live.data?.status, wallet.id);
               const dragging = drag.dragging === index;
               const first = index === 0;
@@ -211,9 +210,18 @@ export function WalletsSection({
                           <GripVertical size={16} strokeWidth={1.5} />
                         </span>
                       )}
-                      <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-md bg-sunken text-text">
-                        <Glyph size={16} strokeWidth={1.5} aria-hidden />
-                      </span>
+                      <WalletIconPicker
+                        name={wallet.name}
+                        value={wallet.icon}
+                        disabled={rescanning !== null}
+                        onChoose={(icon) => {
+                          setSaveFailure(null);
+                          void setIcon.mutateAsync({ id: wallet.id, icon }).then(
+                            () => showToast("Icon changed"),
+                            (error) => setSaveFailure({ id: wallet.id, error }),
+                          );
+                        }}
+                      />
                       {renaming?.id === wallet.id ? (
                         <span className="flex items-center gap-1.5">
                           <input
@@ -294,18 +302,6 @@ export function WalletsSection({
                             </MoveButton>
                           </span>
                         )}
-                        <WalletIconPicker
-                          name={wallet.name}
-                          value={wallet.icon}
-                          disabled={rescanning !== null}
-                          onChoose={(icon) => {
-                            setSaveFailure(null);
-                            void setIcon.mutateAsync({ id: wallet.id, icon }).then(
-                              () => showToast("Icon changed"),
-                              (error) => setSaveFailure({ id: wallet.id, error }),
-                            );
-                          }}
-                        />
                         <Button
                           variant="secondary"
                           size="sm"

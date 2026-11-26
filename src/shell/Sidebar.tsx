@@ -531,17 +531,22 @@ function WalletSwitcher({
 
       {open && (
         <div
-          ref={(node) => {
-            menuRef.current = node;
-            drag.listRef(node);
-          }}
+          ref={menuRef}
           role="menu"
           aria-label="Wallets"
           className={clsx(
-            "absolute z-40 max-h-[60vh] overflow-y-auto rounded-md bg-surface p-1.5 shadow-overlay",
+            "absolute z-40 flex max-h-[60vh] flex-col rounded-md bg-surface p-1.5 shadow-overlay",
             collapsed ? "left-full top-0 ml-2 w-64" : "left-3 right-3 top-full mt-1.5",
           )}
         >
+          {/* Only the wallets scroll: "Add a wallet" stays in sight under
+              them, however many there are. The list takes the menu's
+              padding inside it, so a row's focus ring is not cut. */}
+          <div
+            ref={drag.listRef}
+            role="none"
+            className="relative -m-1.5 min-h-0 overflow-y-auto p-1.5"
+          >
           {shown.map((wallet, index) => {
             const current = wallet.id === activeWalletId;
             const Glyph = walletGlyph(wallet.icon);
@@ -619,7 +624,9 @@ function WalletSwitcher({
               </div>
             );
           })}
-          <div aria-hidden className="mx-1 my-1 h-px bg-border/60" />
+          <DropLine y={drag.lineY} />
+          </div>
+          <div aria-hidden className="mx-1 my-1 h-px shrink-0 bg-border/60" />
           <button
             type="button"
             role="menuitem"
@@ -628,12 +635,11 @@ function WalletSwitcher({
               setOpen(false);
               setAddWalletOpen(true);
             }}
-            className="flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left font-ui text-sm text-muted transition-colors duration-150 hover:bg-sunken/70 hover:text-text"
+            className="flex w-full shrink-0 cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left font-ui text-sm text-muted transition-colors duration-150 hover:bg-sunken/70 hover:text-text"
           >
             <Plus size={15} strokeWidth={1.5} aria-hidden className="shrink-0" />
             Add a wallet
           </button>
-          <DropLine y={drag.lineY} />
         </div>
       )}
     </div>

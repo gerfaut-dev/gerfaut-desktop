@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- In Settings › Wallets, a wallet's icon is changed by clicking the icon itself, left of its name. The Icon button on the right is gone.
 - A sync more than 30 minutes old is written in amber behind a clock, in the sidebar, under the title of Transactions and UTXOs, and on the "Last sync" row of the Overview. With the sidebar folded, an old or failed sync puts a small amber mark on the sync icon.
 - After a failed sync, the "Last sync" row of the Overview still says when the last sync went through, such as "4 min ago · Sync failed", above the reason.
 - The times of the sync lines, such as "2 min ago", move on while a page stays open. They used to keep the value they were first drawn with.
@@ -42,6 +43,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- With many wallets, "Add a wallet" stays at the bottom of the wallet menu in the sidebar, under a list that scrolls. It used to be the last row of that list, out of sight past eleven or twelve wallets.
 - With no wallet added yet, Overview in the sidebar can be clicked. It used to be greyed out, so once you had opened Settings, "Add a wallet" was the only way back to the first page.
 - The AppImage keeps its own cache of GStreamer plugins, in Gerfaut's folder of the user's cache (`~/.cache/com.gerfautwallet.gerfaut` by default). It used to share the system's one, so after every start of Gerfaut, the other apps that play media through GStreamer scanned all their plugins again.
 - With no network, a sync fails and says so at once. It used to stay on "Syncing…" until the system saw a network again, even for a node on the same machine.
