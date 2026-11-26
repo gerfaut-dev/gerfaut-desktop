@@ -9,8 +9,9 @@
 //
 // The check asks the site (gerfaut-wallet.com/releases/desktop.json) for
 // the latest release and nothing else: no identifier goes with it, but
-// the site sees the address it comes from. It takes the route the syncs take: with an onion
-// backend the core sends it through Tor, and when Tor cannot be had it
+// the site sees the address it comes from. It takes the route the syncs
+// take: with an onion backend the core sends it through Tor, and when
+// Tor cannot be had it
 // sends nothing and says so. The check of a session never starts the
 // built-in Tor for itself: it goes through the system's Tor or the one
 // a sync or Live brought up, or waits for the next hour. The button in

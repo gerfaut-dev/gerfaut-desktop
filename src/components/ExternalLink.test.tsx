@@ -25,7 +25,7 @@ function Link({ url }: { url: string }) {
   return (
     <>
       <button type="button" onClick={() => void link.open(url)}>
-        Open the releases page
+        Open the download page
       </button>
       <OpenFailure url={link.failed} />
     </>
@@ -61,14 +61,14 @@ describe("a link nothing opens", () => {
     render(<Link url={RELEASES} />);
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole("button", { name: "Open the releases page" }));
+    await user.click(screen.getByRole("button", { name: "Open the download page" }));
     const note = await screen.findByRole("alert");
     expect(note).toHaveTextContent("Nothing on this computer opened the link.");
     expect(note).toHaveTextContent(RELEASES);
 
     // Opened the next time: the note goes.
     opener.refuses = false;
-    await user.click(screen.getByRole("button", { name: "Open the releases page" }));
+    await user.click(screen.getByRole("button", { name: "Open the download page" }));
     expect(opener.opened).toEqual([RELEASES]);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });

@@ -31,7 +31,7 @@ export const PRIVACY_URL = "https://gerfaut-wallet.com/privacy";
     A newer release already known, from the daily check or from an
     earlier press of the button, is offered as soon as the card opens:
     this is where the update notice sends people. Which release that is
-    comes from the core. The download button opens the releases page
+    comes from the core. The download button opens the download page
     this app names itself, never an address the network answered.
 
     The check takes the route the syncs take, so with an onion backend

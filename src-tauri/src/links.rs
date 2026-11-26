@@ -1,7 +1,7 @@
 //! The pages Gerfaut links to, opened in the browser.
 //!
 //! The window names the page and this side opens it, or refuses: it
-//! opens the explorer page of a transaction, the releases page, the
+//! opens the explorer page of a transaction, the download page, the
 //! issues page, the privacy policy and the page a price source's credit
 //! links to, and no
 //! other address, whatever a page gone wrong asks for. The address
