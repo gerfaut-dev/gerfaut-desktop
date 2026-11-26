@@ -431,6 +431,7 @@ const priceTable = object<ipc.PriceTable>("PriceTable")({
   currencies: array(currencyEntry),
   sources: array(sourceEntry),
   refresh_secs: num,
+  keep_secs: num,
 });
 const unit: Schema<Unit> = literal("Unit", "btc", "sats");
 const preferences = object<ipc.Preferences>("Preferences")({
@@ -456,6 +457,24 @@ const priceQuote = object<ipc.PriceQuote>("PriceQuote")({
   currency: fiatCurrency,
   source: priceSource,
   at: num,
+});
+const troubleKind: Schema<ipc.TroubleKind> = literal(
+  "TroubleKind",
+  "rate_limited",
+  "unreachable",
+  "refused",
+  "tor",
+);
+const priceTrouble = object<ipc.PriceTrouble>("PriceTrouble")({
+  kind: troubleKind,
+  since: num,
+  next_try: num,
+  lasting: bool,
+});
+const priceReading = tagged<ipc.PriceReading>("PriceReading")("state", {
+  fresh: { quote: priceQuote },
+  kept: { quote: priceQuote, trouble: priceTrouble },
+  missing: { trouble: priceTrouble },
 });
 const pricePoint = object<ipc.PricePoint>("PricePoint")({ t: num, rate: num });
 const priceHistory = object<ipc.PriceHistory>("PriceHistory")({
@@ -822,8 +841,10 @@ const CONTRACT: Record<string, AnySchema | Away> = {
   PricePoint: pricePoint,
   PriceQuote: priceQuote,
   PriceRange: priceRange,
+  PriceReading: priceReading,
   PriceSource: priceSource,
   PriceTable: priceTable,
+  PriceTrouble: priceTrouble,
   PublicServer: publicServer,
   QrFormat: qrFormat,
   QrProgress: qrProgress,
@@ -852,6 +873,7 @@ const CONTRACT: Record<string, AnySchema | Away> = {
   TorSettings: torSettings,
   TorStatus: torStatus,
   TorVia: torVia,
+  TroubleKind: troubleKind,
   TxDetail: txDetail,
   TxExtras: txExtras,
   TxInputPreview: txInputPreview,

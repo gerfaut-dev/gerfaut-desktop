@@ -5,42 +5,97 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FALSE_PROOF } from "../lib/ipc";
-import type { PriceQuote, SyncAllReport, WalletMeta } from "../lib/ipc";
+import type { PriceHistory, PriceQuote, PriceReading, SyncAllReport, WalletMeta } from "../lib/ipc";
 import { coreCase } from "../test/core";
 import { useUi } from "./store";
-import { keys, liveAnswer, useRemoveWallet, useSyncAll, useSyncWallet } from "./queries";
+import {
+  keys,
+  priceReading,
+  quoteOf,
+  shownSeries,
+  useRemoveWallet,
+  useSyncAll,
+  useSyncWallet,
+} from "./queries";
 
-const QUOTE: PriceQuote = {
-  rate: 100_000,
-  currency: "eur",
-  source: "coingecko",
-  at: 1_755_000_000,
-};
+const FRESH = coreCase<PriceReading>("PriceReading", "fresh");
+const KEPT = coreCase<PriceReading>("PriceReading", "kept");
+const MISSING = coreCase<PriceReading>("PriceReading", "missing");
+const QUOTE: PriceQuote = (FRESH as Extract<PriceReading, { state: "fresh" }>).quote;
 
-/** A price display uses the last answer only while it still holds. */
+/** A price display prices with the core's quote, fresh or kept. */
 describe("the price a display may use", () => {
-  it("is the last answer, in the chosen currency", () => {
-    expect(liveAnswer({ isError: false, data: QUOTE, fetchStatus: "idle" }, "eur")).toBe(QUOTE);
+  const quote = (reading: PriceReading | undefined, currency = QUOTE.currency) =>
+    quoteOf(priceReading({ isError: false, data: reading }), currency);
+
+  it("is the fresh quote, in the chosen currency", () => {
+    expect(quote(FRESH)).toEqual(QUOTE);
   });
 
-  it("is none before the first answer", () => {
-    expect(liveAnswer({ isError: false, data: undefined, fetchStatus: "fetching" }, "eur")).toBeNull();
+  /** One failed refresh used to drop the price everywhere: the core
+      now keeps the last quote, and so do the amounts. */
+  it("is the kept quote while the source fails", () => {
+    expect(quote(KEPT)).toEqual(QUOTE);
   });
 
-  /** The cache keeps the answer before a failed refresh: it is an hour
-      old by the time anyone reads it, and says nothing of it. */
-  it("is none once the last request failed, whatever the cache holds", () => {
-    expect(liveAnswer({ isError: true, data: QUOTE, fetchStatus: "idle" }, "eur")).toBeNull();
+  it("is none when the core has no quote to keep", () => {
+    expect(quote(MISSING)).toBeNull();
   });
 
-  /** Held back offline, a refresh leaves the query a success with the
-      answer before it: no fresher than a failed one. */
-  it("is none while a refresh waits for the network", () => {
-    expect(liveAnswer({ isError: false, data: QUOTE, fetchStatus: "paused" }, "eur")).toBeNull();
+  it("is none before the first reading", () => {
+    expect(quote(undefined)).toBeNull();
   });
 
   it("is none in another currency than the one chosen", () => {
-    expect(liveAnswer({ isError: false, data: QUOTE, fetchStatus: "idle" }, "usd")).toBeNull();
+    expect(quote(FRESH, "usd")).toBeNull();
+  });
+
+  /** Source trouble is in the reading; a failed call is the core
+      refusing, and the reading before it is no longer aged by it. */
+  it("is none once a call to the core failed, whatever the cache holds", () => {
+    expect(quoteOf(priceReading({ isError: true, data: FRESH }), QUOTE.currency)).toBeNull();
+  });
+});
+
+/** The overview card keeps a series through a failed refresh, while
+    the core would still keep a quote that old. */
+describe("the price series the card may show", () => {
+  const KEEP = 21_600;
+  const SERIES: PriceHistory = {
+    points: [{ t: 1_750_000_000, rate: 92_000 }],
+    currency: "eur",
+    source: "coingecko",
+    range: "month",
+    at: 1_750_000_000,
+  };
+  const chosen = { currency: "eur", source: "coingecko" } as const;
+  const at = (secondsLater: number) => (SERIES.at + secondsLater) * 1000;
+
+  it("is the series, not kept, while its refresh went through", () => {
+    expect(shownSeries({ isError: false, data: SERIES }, chosen, KEEP, at(60))).toEqual({
+      series: SERIES,
+      kept: false,
+    });
+  });
+
+  it("is the series before a failed refresh, marked kept", () => {
+    expect(shownSeries({ isError: true, data: SERIES }, chosen, KEEP, at(KEEP - 1))).toEqual({
+      series: SERIES,
+      kept: true,
+    });
+  });
+
+  it("is none once the kept series is as old as the core keeps a quote", () => {
+    expect(shownSeries({ isError: true, data: SERIES }, chosen, KEEP, at(KEEP))).toBeNull();
+  });
+
+  it("is none in another currency or from another source than chosen", () => {
+    expect(
+      shownSeries({ isError: false, data: SERIES }, { ...chosen, currency: "usd" }, KEEP, at(60)),
+    ).toBeNull();
+    expect(
+      shownSeries({ isError: true, data: SERIES }, { ...chosen, source: "mempool_space" }, KEEP, at(60)),
+    ).toBeNull();
   });
 });
 

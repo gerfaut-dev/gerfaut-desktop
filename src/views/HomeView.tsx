@@ -35,7 +35,7 @@ import type { PriceRange, SyncStamp, TxSummary, WalletMeta, WalletSnapshot } fro
 import { policyDigest } from "../lib/policy";
 import { balanceSeries } from "../lib/series";
 import {
-  liveAnswer,
+  shownSeries,
   torDown,
   usePriceHistory,
   usePriceTable,
@@ -454,9 +454,17 @@ function PriceCard() {
   // Asked once the ranges are known, so the range asked for is one the
   // source serves, and the series is asked once.
   const history = usePriceHistory(range, fiatEnabled && table !== undefined);
-  // A refresh that failed shows no price, like the amounts: the series
-  // before it stays in the cache, and its last point is not today's.
-  const answer = liveAnswer(history, fiatCurrency);
+  const now = useNow();
+  // A refresh that failed keeps the series before it on screen, dated,
+  // while it is younger than what the core keeps a quote; older, its
+  // last point would read as today's price.
+  const shown = shownSeries(
+    history,
+    { currency: fiatCurrency, source: fiatSource },
+    table?.keep_secs,
+    now,
+  );
+  const answer = shown?.series;
   const points = answer?.points ?? [];
   const first = points[0];
   const last = points[points.length - 1];
@@ -510,6 +518,11 @@ function PriceCard() {
               {change >= 0 ? "+" : "−"}
               {Math.abs(change).toFixed(1)}%
             </span>
+          )}
+          {shown?.kept && (
+            <p className="tabular basis-full font-ui text-xs text-muted">
+              Updated {relativeTime(shown.series.at, now)}
+            </p>
           )}
         </div>
       ) : (
