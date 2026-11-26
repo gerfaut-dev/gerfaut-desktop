@@ -890,6 +890,42 @@ describe("the TLS switch of a server typed by hand", () => {
     expect(screen.queryByText(/TLS turned off/)).not.toBeInTheDocument();
   });
 
+  /** A name of the local network, with no dot: the core does not read
+      it as an address, so the port decides alone. */
+  it("lets the port decide for a bare host name", async () => {
+    const read = mockReading();
+    const user = await emptyForm();
+    await user.type(field("Host"), "umbrel");
+    await typePort(user, "50001");
+
+    await waitFor(() => expect(toggle("Use TLS")).toHaveAttribute("aria-checked", "false"));
+    expect(screen.getByText("TLS turned off: port 50001 usually runs without it.")).toBeInTheDocument();
+    expect(read).toContain("electrum.invalid:50001");
+  });
+
+  /** An onion turned TLS off; the host is then replaced by one the
+      onion reason no longer covers. The switch must not stay off with
+      a reason that is no longer true. */
+  it("turns TLS back on when the address that turned it off is gone", async () => {
+    mockReading();
+    const user = await emptyForm();
+    await user.type(field("Host"), "gerfautexample123.onion");
+    await typePort(user, "50005");
+    await waitFor(() => expect(toggle("Use TLS")).toHaveAttribute("aria-checked", "false"));
+
+    await user.clear(field("Host"));
+    await user.type(field("Host"), "umbrel");
+    await waitFor(() => expect(toggle("Use TLS")).toHaveAttribute("aria-checked", "true"));
+    expect(screen.queryByText(/TLS turned off/)).not.toBeInTheDocument();
+
+    // And with no address left to read at all.
+    await user.type(field("Host"), ".onion");
+    await waitFor(() => expect(toggle("Use TLS")).toHaveAttribute("aria-checked", "false"));
+    await user.clear(field("Port"));
+    await waitFor(() => expect(toggle("Use TLS")).toHaveAttribute("aria-checked", "true"));
+    expect(screen.queryByText(/TLS turned off/)).not.toBeInTheDocument();
+  });
+
   it("never overrides a switch the person set", async () => {
     mockReading();
     const user = await emptyForm();

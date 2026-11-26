@@ -194,27 +194,49 @@ export function BackendSection({
 
   // The core reads host and port as it reads a scanned address with no
   // scheme: a port that conventionally runs in the clear, or an onion,
-  // turns TLS off. An answer about an address since retyped is dropped,
-  // and so is one the core cannot read yet (a host half typed). A host
-  // with a scheme of its own answers for TLS in the port's place, and an
-  // IPv6 literal out of its brackets swallows the port: neither is read.
+  // turns TLS off. A host it does not read as an address (a bare name
+  // such as `umbrel`, half a name, an IPv6 literal out of its brackets)
+  // leaves the port to decide alone. With no port to read either, or a
+  // host holding a scheme of its own, the switch goes back on, as the
+  // empty form had it: a reason given for an address since changed
+  // would no longer be true. An answer about an address since retyped
+  // is dropped.
   useEffect(() => {
-    if (!tlsFollows || !host.trim() || !port.trim() || host.includes("://")) return;
+    if (!tlsFollows) return;
+    const typedHost = host.trim();
+    const typedPort = port.trim();
+    const unfollowed = () => {
+      setTls(true);
+      setTlsNote(null);
+    };
+    if (!typedHost || !/^\d+$/.test(typedPort) || typedHost.includes("://")) {
+      unfollowed();
+      return;
+    }
     let stale = false;
-    ipc
-      .parseBackend(`${host.trim()}:${port.trim()}`)
+    const read = (address: string) =>
+      ipc.parseBackend(address).then(
+        (backend) =>
+          backend.kind === "electrum" && backend.port === Number(typedPort) ? backend : null,
+        () => null,
+      );
+    void read(`${typedHost}:${typedPort}`)
+      .then((backend) => backend ?? read(`electrum.invalid:${typedPort}`))
       .then((backend) => {
-        if (stale || backend.kind !== "electrum" || backend.port !== Number(port.trim())) return;
+        if (stale) return;
+        if (!backend) {
+          unfollowed();
+          return;
+        }
         setTls(backend.tls);
         setTlsNote(
           backend.tls
             ? null
             : backend.onion
               ? "TLS turned off: Tor already encrypts the connection to an onion server."
-              : `TLS turned off: port ${port.trim()} usually runs without it.`,
+              : `TLS turned off: port ${typedPort} usually runs without it.`,
         );
-      })
-      .catch(() => {});
+      });
     return () => {
       stale = true;
     };
