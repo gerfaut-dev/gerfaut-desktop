@@ -861,6 +861,24 @@ describe("BroadcastView", () => {
     expect(screen.queryByText("non-standard script")).not.toBeInTheDocument();
   });
 
+  /** The line under the button and the picker's filter name the same
+      extensions, and the line is the button's description: in sight,
+      and said with it to a keyboard or a screen reader. */
+  it("says which files Import a file opens, before it opens", () => {
+    mount();
+    const button = screen.getByRole("button", { name: "Import a file" });
+    const said = button.getAttribute("aria-describedby");
+    const hint = said ? document.getElementById(said) : null;
+    expect(hint).toBeVisible();
+    expect(button).toHaveAccessibleDescription(hint?.textContent ?? "");
+
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+    const filtered = (input?.accept ?? "").split(",").filter((type) => type.startsWith("."));
+    const named = hint?.textContent?.match(/\.[a-z]+\b/g) ?? [];
+    expect(filtered.length).toBeGreaterThan(0);
+    expect(new Set(named)).toEqual(new Set(filtered));
+  });
+
   it("opens the file picker as an excursion, until a file is chosen", () => {
     mount();
     fireEvent.click(screen.getByRole("button", { name: "Import a file" }));
