@@ -14,7 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - While its window is open and unlocked, Gerfaut syncs your wallets again every 10 minutes. It used to sync once at startup, then only when Live heard a transaction. A sync that fails is tried again 10 minutes later.
 - The sidebar says when your wallets last synced, under "Sync all", on every page, such as "Synced 2 min ago". With several wallets, it dates the one synced longest ago. After a failed sync it reads "Sync failed" above the date of the last sync. With the sidebar folded, the date is in the tooltip of the sync button.
 - A Privacy policy button in Settings › About opens the policy on gerfaut-wallet.com, which lists every request Gerfaut sends and who receives it.
-- When you save a backend in Settings › Network, Gerfaut tests the connection and says what it found under Save backend. A server that answers shows its block height and software. One that does not gets the reason and what to change, such as a port that expects TLS or a server on another network. "Test again" runs the test once more. It replaces the note that said the certificate of a server that did not answer was unchecked.
+- When you save a backend in Settings › Network, Gerfaut tests the connection and says what it found under Save backend. A server that answers shows its block height and software. One that does not gets the reason and what to change, such as a port that expects TLS or a server on another network. "Test again" runs the test once more. It replaces the note that said the certificate of a server that did not answer was unchecked. While a test runs, "Cancel" stops it. The backend stays saved, untested. Editing the form during a test stops it too.
 
 ### Changed
 

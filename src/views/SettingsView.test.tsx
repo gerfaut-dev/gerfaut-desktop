@@ -392,11 +392,18 @@ describe("saving a server address", () => {
 describe("testing the backend once saved", () => {
   /** The section's own commands, an address the core reads as given,
       and a test answered when the test chooses. */
-  function mockCheckIpc(options: { stored?: () => Promise<void> } = {}) {
+  function mockCheckIpc(
+    options: { stored?: () => Promise<void>; cancelled?: () => Promise<boolean> } = {},
+  ) {
     const checks: unknown[] = [];
+    const cancels: unknown[] = [];
     let answer: (check: BackendCheck) => void = () => {};
     let fail: (error: unknown) => void = () => {};
     mockIPC((cmd, args) => {
+      if (cmd === "cancel_backend_check") {
+        cancels.push(args);
+        return options.cancelled?.() ?? true;
+      }
       if (cmd === "public_servers") return [];
       if (cmd === "live_limits") return LIVE_LIMITS;
       if (cmd === "inspect_certificate") return { host: "node.local:50002", status: "trusted" };
@@ -412,6 +419,7 @@ describe("testing the backend once saved", () => {
     });
     return {
       checks,
+      cancels,
       answer: (check: BackendCheck) => act(async () => answer(check)),
       fail: (error: unknown) => act(async () => fail(error)),
       stored: options.stored,
@@ -604,7 +612,122 @@ describe("testing the backend once saved", () => {
     expect(screen.queryByRole("button", { name: "Test again" })).not.toBeInTheDocument();
   });
 
-  it("drops the answer of a test once the form changed under it", async () => {
+  const cancel = () => screen.getByRole("button", { name: "Cancel the connection test" });
+  const CANCELLED = coreCase<BackendCheck>("BackendCheck", "cancelled");
+
+  /** What a cancelled test leaves: the backend saved, said untested. */
+  function expectCancelled() {
+    expect(status()).toHaveTextContent("Test cancelled");
+    expect(status()).toHaveTextContent("The backend is saved, but not tested.");
+    expect(within(status()).getByRole("button", { name: "Test again" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel the connection test" })).not.toBeInTheDocument();
+  }
+
+  it("stops the test under way on Cancel, in the core and on screen", async () => {
+    const core = mockCheckIpc();
+    renderStored(ELECTRUM);
+    const user = userEvent.setup();
+    await user.click(save());
+    await waitFor(() => expect(status()).toHaveTextContent("Testing the connection…"));
+    // The word on the button is the plain one; its name says what it stops.
+    expect(cancel()).toHaveTextContent(/^Cancel$/);
+
+    await user.click(cancel());
+    expectCancelled();
+    expect(core.cancels).toEqual([{ network: "mainnet" }]);
+    expect(save()).not.toHaveAttribute("aria-busy");
+  });
+
+  it.each<[string, BackendCheck]>([
+    ["a server that answered", coreCase<BackendCheck>("BackendCheck", "reached_electrum")],
+    ["a server that refused", coreCase<BackendCheck>("BackendCheck", "refused")],
+  ])("keeps a cancelled test cancelled when %s lands late", async (_, late) => {
+    const core = mockCheckIpc();
+    renderStored(ELECTRUM);
+    const user = userEvent.setup();
+    await user.click(save());
+    await waitFor(() => expect(status()).toHaveTextContent("Testing the connection…"));
+    await user.click(cancel());
+
+    await core.answer(late);
+    expectCancelled();
+  });
+
+  it("says a test the core cancelled itself was cancelled", async () => {
+    const core = mockCheckIpc();
+    renderStored(ELECTRUM);
+    const user = userEvent.setup();
+    await user.click(save());
+    await core.answer(CANCELLED);
+
+    expectCancelled();
+    expect(save()).not.toHaveAttribute("aria-busy");
+  });
+
+  it("starts the next test once the core has stopped the cancelled one", async () => {
+    let stopped: (was: boolean) => void = () => {};
+    const core = mockCheckIpc({
+      cancelled: () =>
+        new Promise<boolean>((resolve) => {
+          stopped = resolve;
+        }),
+    });
+    renderStored(ELECTRUM);
+    const user = userEvent.setup();
+    await user.click(save());
+    await waitFor(() => expect(core.checks).toHaveLength(1));
+    await user.click(cancel());
+    await user.click(screen.getByRole("button", { name: "Test again" }));
+    expect(status()).toHaveTextContent("Testing the connection…");
+    // Sent first, the new test would be the one the cancel stops.
+    expect(core.checks).toHaveLength(1);
+
+    await act(async () => stopped(true));
+    expect(core.checks).toHaveLength(2);
+  });
+
+  it("hands the keyboard from Cancel to Test again", async () => {
+    mockCheckIpc();
+    renderStored(ELECTRUM);
+    const user = userEvent.setup();
+    await user.click(save());
+    await waitFor(() => expect(status()).toHaveTextContent("Testing the connection…"));
+    // Save backend keeps the focus it was pressed with, busy, and Tab
+    // goes on to Cancel.
+    expect(save()).toHaveFocus();
+    await user.tab();
+    expect(cancel()).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+    expectCancelled();
+    expect(within(status()).getByRole("button", { name: "Test again" })).toHaveFocus();
+  });
+
+  it("hands the keyboard on to Test again when the test ends under Cancel", async () => {
+    const core = mockCheckIpc();
+    renderStored(ELECTRUM);
+    const user = userEvent.setup();
+    await user.click(save());
+    await waitFor(() => expect(status()).toHaveTextContent("Testing the connection…"));
+    await user.tab();
+    expect(cancel()).toHaveFocus();
+
+    await core.answer(coreCase<BackendCheck>("BackendCheck", "reached_electrum"));
+    expect(screen.getByRole("button", { name: "Test again" })).toHaveFocus();
+  });
+
+  it("leaves the focus where it is when the test ends elsewhere", async () => {
+    const core = mockCheckIpc();
+    renderStored(ELECTRUM);
+    const user = userEvent.setup();
+    await user.click(save());
+    await waitFor(() => expect(status()).toHaveTextContent("Testing the connection…"));
+
+    await core.answer(coreCase<BackendCheck>("BackendCheck", "reached_electrum"));
+    expect(save()).toHaveFocus();
+  });
+
+  it("cancels the test under way once the form changes", async () => {
     const core = mockCheckIpc();
     renderStored(ELECTRUM);
     const user = userEvent.setup();
@@ -612,11 +735,38 @@ describe("testing the backend once saved", () => {
     await waitFor(() => expect(status()).toHaveTextContent("Testing the connection…"));
 
     await user.type(field("Port"), "1");
-    // Still one test at a time: the one under way keeps the button.
-    expect(save()).toHaveAttribute("aria-busy", "true");
-    await core.answer(coreCase<BackendCheck>("BackendCheck", "reached_electrum"));
+    expect(core.cancels).toEqual([{ network: "mainnet" }]);
     expect(status()).toHaveTextContent("");
     expect(save()).not.toHaveAttribute("aria-busy");
+    // What the core still answers is about an address no longer shown.
+    await core.answer(CANCELLED);
+    expect(status()).toHaveTextContent("");
+  });
+
+  it("leaves another network's test alone when a form changes", async () => {
+    const core = mockCheckIpc();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const on = (network: "mainnet" | "signet") => (
+      <QueryClientProvider client={client}>
+        <BackendSection
+          network={network}
+          settings={{ ...SETTINGS, backends: { mainnet: ELECTRUM, signet: ELECTRUM } }}
+          onSave={async () => {}}
+        />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(on("mainnet"));
+    const user = userEvent.setup();
+    await user.click(save());
+    await waitFor(() => expect(status()).toHaveTextContent("Testing the connection…"));
+
+    rerender(on("signet"));
+    await user.type(field("Port"), "1");
+    expect(core.cancels).toEqual([]);
+    rerender(on("mainnet"));
+    expect(status()).toHaveTextContent("Testing the connection…");
+    await core.answer(coreCase<BackendCheck>("BackendCheck", "reached_electrum"));
+    expect(status()).toHaveTextContent("Connected to electrum.example.org:50002");
   });
 
   it("tests nothing the vault would not store", async () => {

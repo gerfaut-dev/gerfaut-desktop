@@ -2877,6 +2877,7 @@ describe("electrum certificates", () => {
   // because the user went to look at a wallet meanwhile.
   it("keeps what the test found once the user left the page and came back", async () => {
     let answer: (check: unknown) => void = () => {};
+    const cancels: unknown[] = [];
     walletIpc({
       inspect_certificate: () => ({ host: "node.example.org:50002", status: "trusted" }),
       set_backend: () => undefined,
@@ -2884,6 +2885,10 @@ describe("electrum certificates", () => {
         new Promise((resolve) => {
           answer = resolve;
         }),
+      cancel_backend_check: (args) => {
+        cancels.push(args);
+        return true;
+      },
     });
     renderApp();
     const user = userEvent.setup();
@@ -2893,6 +2898,8 @@ describe("electrum certificates", () => {
 
     await user.click(sidebar().getByRole("button", { name: "Overview" }));
     await screen.findByText("Bitcoin price");
+    // Leaving the page is no cancel: the test goes on.
+    expect(cancels).toEqual([]);
     await act(async () => answer(coreCase("BackendCheck", "another_network")));
     await openSettings(user, "Network");
 

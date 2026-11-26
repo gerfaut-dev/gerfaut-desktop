@@ -403,6 +403,7 @@ const backendCheck = tagged<ipc.BackendCheck>("BackendCheck")("outcome", {
     server_network: nullable(network),
     tor: bool,
   },
+  cancelled: {},
 });
 
 // --- prices and preferences ------------------------------------------------

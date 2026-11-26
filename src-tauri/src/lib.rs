@@ -661,6 +661,17 @@ async fn check_backend(
     Ok(state.manager.check_backend(network).await?)
 }
 
+/// Stops the test of `network`'s backend under way, which then answers
+/// cancelled: whether one was running. The backend stays saved.
+#[tauri::command]
+fn cancel_backend_check(
+    state: tauri::State<'_, AppState>,
+    network: Network,
+) -> CommandResult<bool> {
+    state.unlocked()?;
+    Ok(state.manager.cancel_backend_check(network))
+}
+
 #[tauri::command]
 async fn set_gap_limit(state: tauri::State<'_, AppState>, gap_limit: u32) -> CommandResult<()> {
     state.unlocked()?;
@@ -1480,6 +1491,7 @@ pub fn run() {
             set_active_network,
             set_backend,
             check_backend,
+            cancel_backend_check,
             set_gap_limit,
             inspect_certificate,
             set_backend_trusting,
