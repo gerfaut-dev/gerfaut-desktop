@@ -34,7 +34,7 @@ type Finding = string | null | "offline" | "no-tor";
 interface Core {
   /** What the next check finds. */
   finds: Finding;
-  /** A session asks GitHub: the core found a check due. */
+  /** A session asks the site: the core found a check due. */
   due: boolean;
   automatic: boolean;
   /** The newer release known. */
@@ -45,7 +45,7 @@ interface Core {
   /** How many sessions the window opened, counted as they are asked:
       one asked behind the lock counts too, refused or not. */
   sessions: number;
-  /** How many times GitHub was asked. */
+  /** How many times the site was asked. */
   checks: number;
   /** The app lock is set and the window has not been unlocked yet. */
   locked: boolean;
@@ -82,7 +82,7 @@ function mockCore(options: Partial<Core> & { lock?: boolean } = {}): Core {
     silent: false,
     ...rest,
   };
-  /** One request to GitHub, as the core would make it. */
+  /** One request to the site, as the core would make it. */
   const ask = () => {
     if (core.finds === "no-tor") {
       core.torUnavailable = true;
@@ -125,7 +125,7 @@ function mockCore(options: Partial<Core> & { lock?: boolean } = {}): Core {
         if (core.locked) return Promise.reject(LOCKED);
         if (!ask()) return Promise.reject({ kind: "tor", message: "tor: no proxy answers" });
         if (core.finds === "offline") {
-          return Promise.reject({ kind: "sync", message: "github: error sending request" });
+          return Promise.reject({ kind: "sync", message: "releases: error sending request" });
         }
         // The answer is on screen: the core counts it as seen.
         core.dismissed = core.available;
@@ -434,7 +434,7 @@ describe("the About card", () => {
     core.finds = "offline";
     await user.click(screen.getByRole("button", { name: "Check for updates" }));
     expect(
-      await screen.findByText("Could not reach the release page."),
+      await screen.findByText("Could not check for updates."),
     ).toBeInTheDocument();
     expect(openLink).not.toHaveBeenCalled();
   });

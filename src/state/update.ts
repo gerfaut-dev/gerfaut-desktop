@@ -1,15 +1,15 @@
 // Knowing that a newer Gerfaut exists, and saying so once.
 //
 // The core decides all of it and keeps it in the vault: when the app
-// asks GitHub on its own (at most once a day, never within a day of the
+// asks on its own (at most once a day, never within a day of the
 // first session, and a day Tor is needed and not running does not
 // count), which release is worth announcing (never a pre-release) and
 // which one the user closed. This store holds what the core said last,
 // and tells it when the window is unlocked and when the user answers.
 //
-// The check asks GitHub for the latest release of this repository and
-// nothing else: no identifier goes with it, but GitHub sees the address
-// it comes from. It takes the route the syncs take: with an onion
+// The check asks the site (gerfaut-wallet.com/releases/desktop.json) for
+// the latest release and nothing else: no identifier goes with it, but
+// the site sees the address it comes from. It takes the route the syncs take: with an onion
 // backend the core sends it through Tor, and when Tor cannot be had it
 // sends nothing and says so. The check of a session never starts the
 // built-in Tor for itself: it goes through the system's Tor or the one
@@ -25,9 +25,9 @@ import { create } from "zustand";
 import { ipc, type UpdateStatus } from "../lib/ipc";
 import { useLock } from "./lock";
 
-/** Where a release is downloaded from. The one address the update
-    notice and the About card ever open. */
-export const RELEASES_URL = "https://github.com/gerfaut-dev/gerfaut-desktop/releases/latest";
+/** Where a release is downloaded from: the download page of the site.
+    The one address the update notice and the About card ever open. */
+export const RELEASES_URL = "https://gerfaut-wallet.com/download";
 
 /** How often an open window tells the core it is still open, so that
     a day gone by brings the next check. */
@@ -41,7 +41,7 @@ interface UpdateState {
   /** A session the window opened is on its way to the core. */
   checking: boolean;
 
-  /** Reads what the core says, asking GitHub nothing. A core that does
+  /** Reads what the core says, asking the site nothing. A core that does
       not answer, or answers from behind the lock, leaves everything as
       it was. */
   load: () => Promise<void>;

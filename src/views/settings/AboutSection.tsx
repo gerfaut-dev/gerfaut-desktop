@@ -88,7 +88,7 @@ export function AboutSection() {
               {available
                 ? `Gerfaut ${available} is available.`
                 : result === "failed"
-                  ? "Could not reach the release page."
+                  ? "Could not check for updates."
                   : result === "current"
                     ? "You are up to date."
                     : ""}
@@ -139,7 +139,7 @@ export function AboutSection() {
         <div>
           <SettingRow
             title="Check for updates automatically"
-            hint="Asks GitHub for the latest release at most once a day while Gerfaut is unlocked, through Tor when a backend is an onion address, and downloads nothing."
+            hint="Asks gerfaut-wallet.com for the latest version at most once a day while Gerfaut is unlocked, through Tor when a backend is an onion address, and downloads nothing."
           >
             {auto === null ? (
               // The switch's room, kept so the row does not move when

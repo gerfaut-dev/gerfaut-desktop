@@ -22,8 +22,9 @@
 
 use crate::{CommandError, CommandResult};
 
-/// The releases page: the update check and Settings › About send there.
-const RELEASES: &str = "https://github.com/gerfaut-dev/gerfaut-desktop/releases/latest";
+/// The download page of the site: the update notice and Settings ›
+/// About send there.
+const RELEASES: &str = "https://gerfaut-wallet.com/download";
 /// The issues of this repository, behind "Report a problem".
 const ISSUES: &str = "https://github.com/gerfaut-dev/gerfaut-desktop/issues";
 /// The privacy policy on the site, behind its button in Settings › About.
@@ -266,7 +267,11 @@ mod tests {
             &format!("https://mempool.space/regtest/tx/{TXID}"),
             "https://mempool.space/address/bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
             "https://github.com/someone/else/releases/latest",
-            "https://github.com/gerfaut-dev/gerfaut-desktop/releases/latest/other",
+            "https://github.com/gerfaut-dev/gerfaut-desktop/releases/latest",
+            "https://gerfaut-wallet.com/download/evil",
+            "https://gerfaut-wallet.com/download?evil",
+            "https://gerfaut-wallet.com/download#evil",
+            "http://gerfaut-wallet.com/download",
             "https://github.com/gerfaut-dev/gerfaut-desktop/issues/new",
             "https://github.com/gerfaut-dev/gerfaut-desktop/issues?q=evil",
             "https://github.com/someone/else/issues",
