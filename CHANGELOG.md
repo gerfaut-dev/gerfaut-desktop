@@ -48,6 +48,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- The tip of the falcon's beak is no longer cut flat wherever the mark appears, such as the sidebar and the lock screen, at some window sizes and display scales.
 - When the price source fails, amounts keep their fiat value with the last price, for up to 6 hours. Settings › General shows its age next to the rate under Price source, such as "updated 4 min ago". It used to take the fiat value off every amount at the first failed request, and show "The price source did not answer." in orange.
 - A single failed price request is no longer shown. After a second one in a row, a note under the price says what happened and what to do, such as "CoinGecko is not answering. Amounts use the last price until it answers. You can also switch to mempool.space.", with a "Try again" button. When the source limits requests, the note says when Gerfaut asks again, and has no button.
 - Gerfaut asks a failing price source again after 1 minute, then waits longer each time, up to 30 minutes, and follows the wait the source names. It used to ask again one second later.

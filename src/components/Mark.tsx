@@ -1,9 +1,11 @@
 /** The gyrfalcon head, inline so it follows `currentColor`.
-    Path from brand/logo/gerfaut-mark.svg (single source in the brand kit). */
+    Path from brand/logo/gerfaut-mark.svg (single source in the brand kit).
+    The viewBox leaves about 8 units around the outline: hugging it, the
+    box snapped to device pixels shaved the tip of the beak flat. */
 export function Mark({ className }: { className?: string }) {
   return (
     <svg
-      viewBox="0 0 697 574"
+      viewBox="-8 -6 711 587"
       role="img"
       aria-hidden
       className={className}
