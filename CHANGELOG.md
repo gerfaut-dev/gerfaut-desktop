@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- In Settings › Wallets, a wallet's icon is changed by clicking the icon itself, left of its name. The Icon button on the right is gone.
 - A sync more than 30 minutes old is written in amber behind a clock, in the sidebar, under the title of Transactions and UTXOs, and on the "Last sync" row of the Overview. With the sidebar folded, an old or failed sync puts a small amber mark on the sync icon.
 - After a failed sync, the "Last sync" row of the Overview still says when the last sync went through, such as "4 min ago · Sync failed", above the reason.
 - The times of the sync lines, such as "2 min ago", move on while a page stays open. They used to keep the value they were first drawn with.

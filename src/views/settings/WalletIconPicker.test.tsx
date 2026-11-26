@@ -13,7 +13,7 @@ async function openPicker(value: WalletIconId = "wallet") {
   const onChoose = vi.fn();
   render(<WalletIconPicker name="Cold storage" value={value} onChoose={onChoose} />);
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: "Icon" }));
+  await user.click(screen.getByRole("button", { name: "Change icon of Cold storage" }));
   return { user, onChoose, group: screen.getByRole("radiogroup", { name: "Icon of Cold storage" }) };
 }
 
@@ -84,7 +84,7 @@ describe("WalletIconPicker", () => {
     expect(first).toHaveAccessibleName("Swivel key");
     expect(onChoose.mock.calls).toEqual([["swivel_key"]]);
     expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Icon" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Change icon of Cold storage" })).toHaveFocus();
 
     // Opened on that icon, the picker marks it and starts there.
     cleanup();

@@ -1113,7 +1113,7 @@ describe("settings sections", () => {
     // The row wears the icon the core stores.
     expect(row.querySelector("svg.lucide-wallet")).not.toBeNull();
 
-    await user.click(within(row).getByRole("button", { name: "Icon" }));
+    await user.click(within(row).getByRole("button", { name: "Change icon of Cold storage" }));
     const group = screen.getByRole("radiogroup", { name: "Icon of Cold storage" });
     expect(within(group).getAllByRole("radio")).toHaveLength(32);
     const wallet = within(group).getByRole("radio", { name: "Wallet" });
@@ -1129,7 +1129,7 @@ describe("settings sections", () => {
       { id: "w-1", icon: "snowflake" },
     ]);
     expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
-    expect(within(row).getByRole("button", { name: "Icon" })).toHaveFocus();
+    expect(within(row).getByRole("button", { name: "Change icon of Cold storage" })).toHaveFocus();
   });
 
   it("closes the icon picker on Escape or a click outside, choosing nothing", async () => {
@@ -1137,7 +1137,7 @@ describe("settings sections", () => {
     act(() => useUi.getState().openSettings("wallets"));
     renderSettings();
     const user = userEvent.setup();
-    const trigger = screen.getByRole("button", { name: "Icon" });
+    const trigger = screen.getByRole("button", { name: "Change icon of Cold storage" });
     await user.click(trigger);
     expect(screen.getByRole("radiogroup")).toBeInTheDocument();
     await user.keyboard("{Escape}");
@@ -1159,7 +1159,7 @@ describe("settings sections", () => {
     act(() => useUi.getState().openSettings("wallets"));
     renderSettings();
     const user = userEvent.setup();
-    const trigger = screen.getByRole("button", { name: "Icon" });
+    const trigger = screen.getByRole("button", { name: "Change icon of Cold storage" });
     await user.click(trigger);
     expect(screen.getByRole("radiogroup")).toBeInTheDocument();
     await user.tab();
