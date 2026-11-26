@@ -202,7 +202,7 @@ function PriceTroubleNote({
   const table = usePriceTable().data;
   const { retry, isPending } = useRetryPrice();
   const label = (source: PriceSource) =>
-    table?.sources.find((entry) => entry.source === source)?.label ?? source;
+    table?.sources.find((entry) => entry.source === source)?.label ?? "The price source";
   const other = table?.currencies
     .find((entry) => entry.currency === fiatCurrency)
     ?.sources.find((source) => source !== fiatSource);
@@ -226,11 +226,16 @@ function PriceTroubleNote({
     sentences.push(`You can also switch to ${label(other)}.`);
   }
   return (
-    <Notice tone="info" role="status">
+    // No live region: the note comes on its own after two failures, and
+    // its wait changes every minute, which a screen reader would read
+    // out each time. Its button carries the state of a retry.
+    <Notice tone="info">
       {sentences.join(" ")}
       {trouble.kind !== "rate_limited" && (
+        // Below the sentence, at the right, as the mobile's note puts
+        // its actions: the sentence keeps the whole width.
         <div className="mt-2 flex justify-end">
-          <Button variant="secondary" size="sm" onTint disabled={isPending} onClick={retry}>
+          <Button variant="secondary" size="sm" onTint busy={isPending} onClick={retry}>
             {isPending ? "Trying…" : "Try again"}
           </Button>
         </div>

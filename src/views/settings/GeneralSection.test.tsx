@@ -187,7 +187,12 @@ describe("Try again", () => {
     await user.click(await screen.findByRole("button", { name: "Try again" }));
 
     expect(asked).toContain("retry_price");
-    expect(screen.getByRole("button", { name: "Trying…" })).toBeDisabled();
+    // Busy, not off: it keeps its fill and the keyboard's focus, and a
+    // second press while it runs asks nothing more.
+    const trying = screen.getByRole("button", { name: "Trying…" });
+    expect(trying).toHaveAttribute("aria-disabled", "true");
+    await user.click(trying);
+    expect(asked.filter((cmd) => cmd === "retry_price")).toHaveLength(1);
 
     await act(async () => answer(fresh(aged(0))));
     expect(await screen.findByText(/^1 BTC = €92\s034\.25 · updated just now$/)).toBeInTheDocument();
