@@ -41,6 +41,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- With many wallets, "Add a wallet" stays at the bottom of the wallet menu in the sidebar, under a list that scrolls. It used to be the last row of that list, out of sight past eleven or twelve wallets.
 - With no wallet added yet, Overview in the sidebar can be clicked. It used to be greyed out, so once you had opened Settings, "Add a wallet" was the only way back to the first page.
 - The AppImage keeps its own cache of GStreamer plugins, in Gerfaut's folder of the user's cache (`~/.cache/com.gerfautwallet.gerfaut` by default). It used to share the system's one, so after every start of Gerfaut, the other apps that play media through GStreamer scanned all their plugins again.
 - With no network, a sync fails and says so at once. It used to stay on "Syncing…" until the system saw a network again, even for a node on the same machine.
