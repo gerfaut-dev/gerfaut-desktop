@@ -7,7 +7,7 @@ import { TxDetailModal } from "./TxDetailModal";
 import type { Network, TxDetail, TxIo } from "../lib/ipc";
 import { formatFiat, formatTimestamp } from "../lib/format";
 import { useUi } from "../state/store";
-import { PRICE_TABLE } from "../test/fixtures";
+import { PRICE_TABLE, fresh } from "../test/fixtures";
 
 const opener = vi.hoisted(() => ({ openLink: vi.fn() }));
 vi.mock("../lib/links", () => opener);
@@ -78,12 +78,12 @@ function open(detail: TxDetail = DETAIL, network: Network = "signet") {
     if (cmd === "get_settings") return { active_network: network, app_prefs: {} };
     if (cmd === "price_table") return PRICE_TABLE;
     if (cmd === "fetch_price") {
-      return {
+      return fresh({
         rate: RATE,
         currency: "eur",
         source: "coingecko",
         at: MINED_AT,
-      };
+      });
     }
     return undefined;
   });

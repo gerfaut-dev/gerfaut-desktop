@@ -7,7 +7,7 @@ import {
   formatFiat,
   formatSats,
 } from "../lib/format";
-import { liveAnswer, useFiatRate, useSettings } from "../state/queries";
+import { priceReading, quoteOf, useFiatRate, useSettings } from "../state/queries";
 import { useUi } from "../state/store";
 import { useCreditFor } from "./PriceCredit";
 
@@ -20,8 +20,9 @@ export function useAmountText(sats: number | null): string {
   return masked ? MASKED : formatAmount(sats, unit);
 }
 
-/** Fiat value of an amount, when the display is enabled and the price
-    source answered the last time it was asked, in the chosen currency.
+/** Fiat value of an amount, when the display is enabled and the core
+    has a quote, fresh or kept from a source that fails since, in the
+    chosen currency.
     Degrades to nothing, never to an error. Every fiat value
     on screen comes from here, so the network is read here once: the
     pages show the wallets of the active network and no other, which
@@ -33,7 +34,7 @@ export function useAmountText(sats: number | null): string {
     value is zero, which no source priced, and it marks nothing. */
 export function useFiatValue(sats: number): string | null {
   const { fiatEnabled, fiatCurrency, masked } = useUi();
-  const quote = liveAnswer(useFiatRate(), fiatCurrency);
+  const quote = quoteOf(priceReading(useFiatRate()), fiatCurrency);
   const network = useSettings().data?.active_network;
   const shown = fiatEnabled && !masked && quote !== null && network !== undefined;
   useCreditFor(shown && network === "mainnet" ? quote.source : null);

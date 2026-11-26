@@ -13,6 +13,7 @@ import type {
   PolicyKey,
   PolicySnapshot,
   PreferencesChange,
+  PriceReading,
   Settings,
   WalletMeta,
   WalletSnapshot,
@@ -23,7 +24,15 @@ import { useBackendSave } from "./state/backendSave";
 import { useLock } from "./state/lock";
 import { useUi } from "./state/store";
 import { coreCase } from "./test/core";
-import { PREFERENCES, PRICE_TABLE, preferencesHeld } from "./test/fixtures";
+import {
+  LASTING_TROUBLE,
+  PREFERENCES,
+  PRICE_TABLE,
+  QUIET_TROUBLE,
+  fresh,
+  kept,
+  preferencesHeld,
+} from "./test/fixtures";
 import { line } from "./test/text";
 
 // A vault opened before: the welcome tour is behind this user, so the
@@ -639,7 +648,7 @@ function walletIpc(
       case "price_table":
         return PRICE_TABLE;
       case "fetch_price":
-        return { rate: 100_000, currency: "eur", source, at: 1_755_000_000 };
+        return fresh({ rate: 100_000, currency: "eur", source, at: 1_755_000_000 });
       case "fetch_price_history":
         return { ...PRICE_HISTORY, source };
       // The live watch is off unless a test turns it on.
@@ -1952,64 +1961,20 @@ describe("display settings", () => {
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
-  /** A refresh that fails leaves the answer before it in the cache.
-      Shown, it would price every amount at a rate nobody can date,
-      under a settings line that says amounts show without fiat. */
-  it("drops every price once the source stops answering", async () => {
+  /** One failed refresh used to drop the price everywhere and light a
+      warning in the settings. The core now keeps the last quote and
+      says nothing of a single failure, and neither do the screens: the
+      amounts keep their value, the card its series, dated. */
+  it("keeps every price through a failed refresh, and says nothing of it", async () => {
     const wallet: WalletMeta = { ...WALLET, network: "mainnet" };
+    const quote = { rate: 100_000, currency: "eur", source: "mempool_space", at: 1_755_000_000 } as const;
+    let reading: PriceReading = fresh(quote);
     let down = false;
-    const answer = <T,>(value: T) =>
-      down ? Promise.reject({ kind: "network", message: "price source timed out" }) : value;
-    walletIpc({
-      get_settings: () => ({
-        ...SETTINGS,
-        active_network: "mainnet",
-        preferences: { ...PREFERENCES, fiat: true },
-      }),
-      list_wallets: () => [wallet],
-      wallet_snapshot: () => ({ ...SNAPSHOT, meta: wallet }),
-      fetch_price: () =>
-        answer({ rate: 100_000, currency: "eur", source: "coingecko", at: 1_755_000_000 }),
-      fetch_price_history: () => answer(PRICE_HISTORY),
-    });
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    renderApp(client);
-    const user = userEvent.setup();
-    expect(await screen.findAllByText("€150.00")).toHaveLength(2);
-    // The series is asked once the table says which ranges the source
-    // serves.
-    expect(await screen.findByText("+11.1%")).toBeInTheDocument();
-
-    down = true;
-    await act(async () => {
-      await client.refetchQueries({ queryKey: ["price"] });
-      await client.refetchQueries({ queryKey: ["price-history"] });
-    });
-    await waitFor(() => expect(screen.queryByText("€150.00")).not.toBeInTheDocument());
-    expect(screen.queryByText("+11.1%")).not.toBeInTheDocument();
-    expect(screen.getByText("The price source did not answer.")).toBeInTheDocument();
-
-    await openSettings(user, "General");
-    expect(
-      await screen.findByText(
-        "The price source did not answer. Amounts show without fiat until it does.",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/^1 BTC =/)).not.toBeInTheDocument();
-  });
-
-  /** Offline, TanStack holds a refresh back by default and the query
-      stays a success with its old answer: hours later the amounts
-      would still carry the price of the moment the link went. The
-      price is a command to the core, asked anyway; the core's failure
-      is what the screens say. */
-  it("drops every price while the machine is offline", async () => {
-    const wallet: WalletMeta = { ...WALLET, network: "mainnet" };
-    let down = false;
-    const asked: string[] = [];
-    const answer = <T,>(cmd: string, value: T) => {
-      asked.push(cmd);
-      return down ? Promise.reject({ kind: "network", message: "no route to host" }) : value;
+    // A series the card got a few minutes ago: young enough to keep.
+    const series = {
+      ...PRICE_HISTORY,
+      source: "mempool_space",
+      at: Math.floor(Date.now() / 1000) - 5 * 60,
     };
     walletIpc({
       get_settings: () => ({
@@ -2019,14 +1984,74 @@ describe("display settings", () => {
       }),
       list_wallets: () => [wallet],
       wallet_snapshot: () => ({ ...SNAPSHOT, meta: wallet }),
-      fetch_price: () =>
-        answer("fetch_price", {
-          rate: 100_000,
-          currency: "eur",
-          source: "coingecko",
-          at: 1_755_000_000,
-        }),
-      fetch_price_history: () => answer("fetch_price_history", PRICE_HISTORY),
+      fetch_price: () => reading,
+      fetch_price_history: () =>
+        down ? Promise.reject({ kind: "sync", message: "sync failed via price: http 503" }) : series,
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderApp(client);
+    const user = userEvent.setup();
+    expect(await screen.findAllByText("€150.00")).toHaveLength(2);
+    // The series is asked once the table says which ranges the source
+    // serves.
+    expect(await screen.findByText("+11.1%")).toBeInTheDocument();
+    expect(screen.queryByText(/^Updated /)).not.toBeInTheDocument();
+
+    reading = kept(quote, QUIET_TROUBLE);
+    down = true;
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["price"] });
+      await client.refetchQueries({ queryKey: ["price-history"] });
+    });
+    // The window clock moves on every 30 s, so it may read up to one
+    // beat behind: the series is four or five minutes old.
+    expect(await screen.findByText(/^Updated [45] min ago$/)).toBeInTheDocument();
+    expect(screen.getAllByText("€150.00")).toHaveLength(2);
+    expect(screen.getByText("+11.1%")).toBeInTheDocument();
+    expect(screen.queryByText("The price source did not answer.")).not.toBeInTheDocument();
+
+    await openSettings(user, "General");
+    expect(await screen.findByText(/^1 BTC =/)).toBeInTheDocument();
+    expect(screen.queryByText(/until it answers/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+  });
+
+  /** Offline, TanStack holds a refresh back by default and the query
+      stays a success with its old answer: hours later the amounts
+      would still carry the price of the moment the link went. The
+      price is a command to the core, asked anyway; what the core reads
+      of the source is what the screens say. Here it has no quote left
+      to keep, and the series before is older than it would keep one. */
+  it("asks the core while the machine is offline, and shows what it reads", async () => {
+    const wallet: WalletMeta = { ...WALLET, network: "mainnet" };
+    let reading: PriceReading = fresh({
+      rate: 100_000,
+      currency: "eur",
+      source: "mempool_space",
+      at: 1_755_000_000,
+    });
+    let down = false;
+    const asked: string[] = [];
+    const answer = <T,>(cmd: string, value: T) => {
+      asked.push(cmd);
+      return value;
+    };
+    walletIpc({
+      get_settings: () => ({
+        ...SETTINGS,
+        active_network: "mainnet",
+        preferences: { ...PREFERENCES, fiat: true },
+      }),
+      list_wallets: () => [wallet],
+      wallet_snapshot: () => ({ ...SNAPSHOT, meta: wallet }),
+      fetch_price: () => answer("fetch_price", reading),
+      fetch_price_history: () =>
+        answer(
+          "fetch_price_history",
+          down
+            ? Promise.reject({ kind: "network", message: "no route to host" })
+            : { ...PRICE_HISTORY, source: "mempool_space" },
+        ),
     });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     renderApp(client);
@@ -2038,6 +2063,7 @@ describe("display settings", () => {
 
     try {
       down = true;
+      reading = { state: "missing", trouble: LASTING_TROUBLE };
       asked.length = 0;
       onlineManager.setOnline(false);
       // Not awaited: a refresh held back offline never settles.
@@ -2059,9 +2085,11 @@ describe("display settings", () => {
       await openSettings(user, "General");
       expect(
         await screen.findByText(
-          "The price source did not answer. Amounts show without fiat until it does.",
+          "mempool.space is not answering. Amounts show without fiat until it answers. You can also switch to CoinGecko.",
         ),
       ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+      expect(screen.queryByText(/^1 BTC =/)).not.toBeInTheDocument();
     } finally {
       onlineManager.setOnline(true);
     }
