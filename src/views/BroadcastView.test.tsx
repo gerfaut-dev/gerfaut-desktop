@@ -8,6 +8,7 @@ import type { BroadcastStatus, Network, RecentBroadcast, TxPreview, TxWarning } 
 import { excursionSince } from "../lib/excursion";
 import { useUi } from "../state/store";
 import { formatFiat } from "../lib/format";
+import { fresh } from "../test/fixtures";
 
 vi.mock("../lib/links", () => ({ openLink: vi.fn() }));
 
@@ -127,7 +128,7 @@ function mount(preview: TxPreview = PREVIEW, standing: BroadcastStatus = status(
       return undefined;
     }
     if (cmd === "transaction_status") return standing;
-    if (cmd === "fetch_price") return { rate: RATE, currency: "eur", at: 0, source: "coingecko" };
+    if (cmd === "fetch_price") return fresh({ rate: RATE, currency: "eur", at: 0, source: "coingecko" });
     return undefined;
   });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

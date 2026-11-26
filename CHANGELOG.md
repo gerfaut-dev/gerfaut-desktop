@@ -46,6 +46,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- When the price source fails, amounts keep their fiat value with the last price, for up to 6 hours. Settings › General shows its age next to the rate under Price source, such as "updated 4 min ago". It used to take the fiat value off every amount at the first failed request, and show "The price source did not answer." in orange.
+- A single failed price request is no longer shown. After a second one in a row, a note under the price says what happened and what to do, such as "CoinGecko is not answering. Amounts use the last price until it answers. You can also switch to mempool.space.", with a "Try again" button. When the source limits requests, the note says when Gerfaut asks again, and has no button.
+- Gerfaut asks a failing price source again after 1 minute, then waits longer each time, up to 30 minutes, and follows the wait the source names. It used to ask again one second later.
+- The Bitcoin price chart of the Overview stays when it cannot be refreshed, with its age under it, such as "Updated 12 min ago".
 - With many wallets, "Add a wallet" stays at the bottom of the wallet menu in the sidebar, under a list that scrolls. It used to be the last row of that list, out of sight past eleven or twelve wallets.
 - With no wallet added yet, Overview in the sidebar can be clicked. It used to be greyed out, so once you had opened Settings, "Add a wallet" was the only way back to the first page.
 - The AppImage keeps its own cache of GStreamer plugins, in Gerfaut's folder of the user's cache (`~/.cache/com.gerfautwallet.gerfaut` by default). It used to share the system's one, so after every start of Gerfaut, the other apps that play media through GStreamer scanned all their plugins again.

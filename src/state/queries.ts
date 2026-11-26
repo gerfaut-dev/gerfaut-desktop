@@ -1,6 +1,6 @@
 // Server-state hooks. One place defines cache keys and invalidation.
 
-import type { FetchStatus, QueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import {
   useMutation,
   useQuery,
@@ -14,7 +14,11 @@ import type {
   LockKind,
   Network,
   ParsedInput,
+  PriceHistory,
+  PriceQuote,
   PriceRange,
+  PriceReading,
+  PriceSource,
   SyncReport,
   WalletIconId,
   WalletMeta,
@@ -383,15 +387,25 @@ export function usePriceTable() {
   });
 }
 
-/** Current BTC price, by the currency and source of the preferences,
-    asked again at the core's cadence while fiat display is on. The key
-    carries what the price is asked by, which the store only takes once
-    the vault stored it: a new key is a price the core asks by it. */
+/** The query key of the current price: what the price is asked by. */
+const priceKey = (source: PriceSource, currency: FiatCurrency) =>
+  ["price", source, currency] as const;
+
+/** Current BTC price reading, by the currency and source of the
+    preferences, asked again at the core's cadence while fiat display
+    is on. The key carries what the price is asked by, which the store
+    only takes once the vault stored it: a new key is a price the core
+    asks by it.
+
+    No retry here: a source that fails is answered by the core, which
+    keeps the last quote, spaces its asks and honours a rate limit. A
+    second request a second after a failure was a burst against that
+    very limit. */
 export function useFiatRate() {
   const { fiatEnabled, fiatSource, fiatCurrency } = useUi();
   const every = usePriceTable().data?.refresh_secs;
   return useQuery({
-    queryKey: ["price", fiatSource, fiatCurrency],
+    queryKey: priceKey(fiatSource, fiatCurrency),
     queryFn: () => ipc.fetchPrice(),
     enabled: fiatEnabled,
     networkMode: PRICE_NETWORK_MODE,
@@ -399,25 +413,69 @@ export function useFiatRate() {
     // Fresh for a little less than the cadence, so the next turn of
     // the clock always asks.
     staleTime: every === undefined ? 0 : every * 1000 - 5_000,
-    retry: 1,
+    retry: false,
   });
 }
 
-/** The answer a price display may use: the last one, while the last
-    request for it went through, and in the currency chosen. A failed
-    refresh keeps the answer before it in the cache, and showing it
-    would price every amount at a rate of an hour ago with nothing to
-    say so; a quote in another currency would put a dollar figure
-    behind a euro sign. A refresh held back offline is no better: it
-    keeps the old answer as if it had just come. Either way the display
-    shows no price, as the settings say it will. */
-export function liveAnswer<T extends { currency: FiatCurrency }>(
-  query: { isError: boolean; data: T | undefined; fetchStatus: FetchStatus },
+/** The reading a price display may use: the core's last one. A call
+    that failed is no source trouble (those are in the reading) but the
+    core refusing to answer, and the reading before it is no longer
+    aged by the core: none then. */
+export function priceReading(query: {
+  isError: boolean;
+  data: PriceReading | undefined;
+}): PriceReading | null {
+  return query.isError ? null : (query.data ?? null);
+}
+
+/** The quote an amount may be priced with: the reading's, fresh or
+    kept, and in the currency chosen, or a dollar figure would sit
+    behind a euro sign. The core keeps a quote six hours at most, so
+    the app does not age it. */
+export function quoteOf(
+  reading: PriceReading | null,
   currency: FiatCurrency,
-): T | null {
-  if (query.isError || query.fetchStatus === "paused") return null;
-  if (!query.data || query.data.currency !== currency) return null;
-  return query.data;
+): PriceQuote | null {
+  if (!reading || reading.state === "missing") return null;
+  return reading.quote.currency === currency ? reading.quote : null;
+}
+
+/** The settings' "Try again": the source asked now, its reading put in
+    place of the current one. A call that fails leaves the reading
+    before it. The key is taken when pressed, so a reading never lands
+    under a currency chosen meanwhile. */
+export function useRetryPrice() {
+  const client = useQueryClient();
+  const { fiatSource, fiatCurrency } = useUi();
+  const mutation = useMutation({
+    mutationFn: (_key: ReturnType<typeof priceKey>) => ipc.retryPrice(),
+    onSuccess: (reading, key) => client.setQueryData(key, reading),
+  });
+  const retry = useCallback(
+    () => mutation.mutate(priceKey(fiatSource, fiatCurrency)),
+    [mutation.mutate, fiatSource, fiatCurrency],
+  );
+  return { retry, isPending: mutation.isPending };
+}
+
+/** The series the price card may show. A refresh that fails keeps the
+    series before it in the cache: it stays on screen while it is the
+    chosen currency's and source's and younger than what the core keeps
+    a quote (`keep_secs`), and says it is `kept`, so the card can date
+    it. Older, it would read as today's price. */
+export function shownSeries(
+  query: { isError: boolean; data: PriceHistory | undefined },
+  chosen: { currency: FiatCurrency; source: PriceSource },
+  keepSecs: number | undefined,
+  nowMs: number,
+): { series: PriceHistory; kept: boolean } | null {
+  const series = query.data;
+  if (!series || series.currency !== chosen.currency || series.source !== chosen.source) {
+    return null;
+  }
+  if (!query.isError) return { series, kept: false };
+  if (keepSecs === undefined || nowMs / 1000 - series.at >= keepSecs) return null;
+  return { series, kept: true };
 }
 
 /** Price series for the overview chart, from the configured source in
@@ -437,7 +495,9 @@ export function usePriceHistory(range: PriceRange, enabled: boolean) {
     enabled,
     networkMode: PRICE_NETWORK_MODE,
     staleTime: range === "day" ? 5 * 60_000 : 30 * 60_000,
-    retry: 1,
+    // The core spaces asks to a source that fails, and refuses a
+    // series outright while the source asked to wait.
+    retry: false,
   });
 }
 

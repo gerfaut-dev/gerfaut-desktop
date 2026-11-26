@@ -767,6 +767,9 @@ export interface PriceTable {
   sources: SourceEntry[];
   /** Seconds from one price to the next while the fiat value is on. */
   refresh_secs: number;
+  /** How long the core keeps a quote standing in for a source that
+      fails, in seconds: what an answer kept on screen may be aged. */
+  keep_secs: number;
 }
 
 /** The preferences both apps keep, mirroring `Preferences` in
@@ -793,6 +796,29 @@ export interface PriceQuote {
   source: PriceSource;
   at: number;
 }
+
+/** The price as the screens should show it, mirroring `PriceReading`.
+    A source that fails is not an error: the core keeps its last quote
+    a while (`kept`, its age in `quote.at`), and says why. */
+export type PriceReading =
+  | { state: "fresh"; quote: PriceQuote }
+  | { state: "kept"; quote: PriceQuote; trouble: PriceTrouble }
+  | { state: "missing"; trouble: PriceTrouble };
+
+/** Why the source failed, mirroring `PriceTrouble`. */
+export interface PriceTrouble {
+  kind: TroubleKind;
+  /** Unix seconds of the first failure in a row. */
+  since: number;
+  /** Unix seconds before which the core does not ask the source again. */
+  next_try: number;
+  /** Whether the screens say it: two failures in a row, or Tor
+      missing. A single failure is quiet. */
+  lasting: boolean;
+}
+
+/** What went wrong with the last ask, mirroring `TroubleKind`. */
+export type TroubleKind = "rate_limited" | "unreachable" | "refused" | "tor";
 
 export type PriceRange = "day" | "week" | "month" | "year" | "max";
 
@@ -1290,7 +1316,10 @@ export const ipc = {
     invoke<Preferences>("set_preferences", { change }),
   priceTable: () => invoke<PriceTable>("price_table"),
   /** In the currency and from the source of the preferences. */
-  fetchPrice: () => invoke<PriceQuote>("fetch_price"),
+  fetchPrice: () => invoke<PriceReading>("fetch_price"),
+  /** A person's "Try again": the source is asked now, unless it asked
+      to wait itself. */
+  retryPrice: () => invoke<PriceReading>("retry_price"),
   fetchPriceHistory: (range: PriceRange) =>
     invoke<PriceHistory>("fetch_price_history", { range }),
   updateStatus: () => invoke<UpdateStatus>("update_status"),

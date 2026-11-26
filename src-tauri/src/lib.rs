@@ -857,15 +857,28 @@ fn price_table() -> gerfaut_core::price::PriceTable {
 }
 
 /// The current BTC price, in the currency and from the source of the
-/// preferences. By the route the syncs take: through Tor when a backend
-/// is an onion address, and not at all when Tor is required and cannot
-/// be had. That case answers `tor`.
+/// preferences, as the screens should show it. By the route the syncs
+/// take: through Tor when a backend is an onion address, and not at all
+/// when Tor is required and cannot be had. A source that fails, or Tor
+/// missing, is in the reading, not an error: the core keeps the last
+/// quote a while and spaces its asks, so the window keeps asking at its
+/// own pace.
 #[tauri::command]
 async fn fetch_price(
     state: tauri::State<'_, AppState>,
-) -> CommandResult<gerfaut_core::price::PriceQuote> {
+) -> CommandResult<gerfaut_core::price::PriceReading> {
     state.unlocked()?;
     Ok(state.manager.fetch_price().await?)
+}
+
+/// [`fetch_price`] at a person's request, the "Try again" of the
+/// settings: the source is asked now, unless it asked to wait itself.
+#[tauri::command]
+async fn retry_price(
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<gerfaut_core::price::PriceReading> {
+    state.unlocked()?;
+    Ok(state.manager.retry_price().await?)
 }
 
 /// A BTC price series, by the same preferences and the same route as
@@ -1514,6 +1527,7 @@ pub fn run() {
             open_link,
             price_table,
             fetch_price,
+            retry_price,
             fetch_price_history,
             check_update,
             update_status,
