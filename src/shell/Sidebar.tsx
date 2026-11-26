@@ -540,8 +540,13 @@ function WalletSwitcher({
           )}
         >
           {/* Only the wallets scroll: "Add a wallet" stays in sight under
-              them, however many there are. */}
-          <div ref={drag.listRef} role="none" className="relative min-h-0 overflow-y-auto">
+              them, however many there are. The list takes the menu's
+              padding inside it, so a row's focus ring is not cut. */}
+          <div
+            ref={drag.listRef}
+            role="none"
+            className="relative -m-1.5 min-h-0 overflow-y-auto p-1.5"
+          >
           {shown.map((wallet, index) => {
             const current = wallet.id === activeWalletId;
             const Glyph = walletGlyph(wallet.icon);
