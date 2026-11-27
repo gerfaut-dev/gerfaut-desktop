@@ -94,19 +94,19 @@
   --animate-spin: spin var(--motion-turn) linear infinite;
   /* Anchored panels (menu, select, tooltip): a fade alone, both ways. */
   --animate-menu-in: fade-in var(--motion-fast) var(--motion-ease) both;
-  --animate-menu-out: fade-out var(--motion-fast) var(--motion-ease-back) both;
+  --animate-menu-out: fade-out var(--motion-fast) var(--motion-ease) both;
   /* Surfaces with no origin on screen (dialog, toast): they arrive in
      `slow` and leave in `base` by the same path. */
   --animate-surface-in: surface-in var(--motion-slow) var(--motion-ease) both;
-  --animate-surface-out: surface-out var(--motion-base) var(--motion-ease-back) both;
+  --animate-surface-out: surface-out var(--motion-base) var(--motion-ease) both;
   /* The dim fades its colour, not its opacity: the dialog it holds
      keeps its own fade instead of multiplying the two. */
   --animate-veil-in: veil-in var(--motion-slow) var(--motion-ease) both;
-  --animate-veil-out: veil-out var(--motion-base) var(--motion-ease-back) both;
+  --animate-veil-out: veil-out var(--motion-base) var(--motion-ease) both;
   /* A block that changes state fades in where it stands. */
   --animate-swap: fade-in var(--motion-base) var(--motion-ease) both;
   /* A cover that leaves (the lock once open). */
-  --animate-fade-out: fade-out var(--motion-base) var(--motion-ease-back) both;
+  --animate-fade-out: fade-out var(--motion-base) var(--motion-ease) both;
 }
 
 /* The motion tokens: the only durations, curve and distances of the
@@ -118,9 +118,10 @@
   --motion-slow: 250ms;
   --motion-turn: 1200ms;
   --motion-hold: 1500ms;
+  /* One curve for what arrives and what leaves: an exit keyframe runs
+     towards the hidden state on it, so it starts as briskly as an entry
+     settles, the same as a route played backwards on the phone. */
   --motion-ease: cubic-bezier(0.2, 0, 0, 1);
-  /* The same curve played backwards, for what leaves by the way it came. */
-  --motion-ease-back: cubic-bezier(1, 0, 0.8, 1);
   --motion-rise: 8px;
   --motion-press: 0.96;
 }
