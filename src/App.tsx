@@ -314,7 +314,11 @@ export default function App() {
                     )}
                     {view === "utxos" && <UtxosView walletId={activeWallet.id} />}
                     {view === "policy" && <PolicyView walletId={activeWallet.id} />}
-                    {view === "receive" && <ReceiveView walletId={activeWallet.id} />}
+                    {/* Keyed: a wallet switch starts the page over, its
+                        peek and what it showed, before the first frame. */}
+                    {view === "receive" && (
+                      <ReceiveView key={activeWallet.id} walletId={activeWallet.id} />
+                    )}
                     {view === "broadcast" && (
                       <BroadcastView network={settings.data.active_network} />
                     )}

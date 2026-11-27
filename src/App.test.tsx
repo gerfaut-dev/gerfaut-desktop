@@ -2535,11 +2535,16 @@ describe("receive page", () => {
   function revealingCore(lastRevealed: number) {
     let last = lastRevealed;
     const kept: number[] = [];
+    // Lists read since the core kept the first address revealed.
+    const reads = { afterReveal: 0 };
     return {
       kept,
+      reads,
       handlers: {
-        receive_addresses: (args: Record<string, unknown>) =>
-          receiveEntries(Number(args.lookahead ?? 0), last),
+        receive_addresses: (args: Record<string, unknown>) => {
+          if (last >= 0) reads.afterReveal += 1;
+          return receiveEntries(Number(args.lookahead ?? 0), last);
+        },
         reveal_receive_address: (args: Record<string, unknown>) => {
           const index = Number(args.index);
           kept.push(index);
@@ -2559,34 +2564,86 @@ describe("receive page", () => {
     return user;
   }
 
-  /** Shown, an address counts as handed out: the core keeps it, and only
-      then does the page offer a newer one. */
-  it("keeps each shown address revealed", async () => {
+  const SHOWN_BEFORE = /This address may have been shown before/;
+
+  /** Shown, an address counts as handed out: the core keeps it. The
+      page revealing the address it shows is no reason to warn about it,
+      even once the core says so. */
+  it("keeps each shown address revealed, and says nothing of a first showing", async () => {
     const core = revealingCore(-1);
     walletIpc(core.handlers);
     const user = await openReceive();
     await waitFor(() => expect(core.kept).toContain(0));
-    expect(await screen.findByRole("button", { name: /new address/i })).toBeInTheDocument();
+    await waitFor(() => expect(core.reads.afterReveal).toBeGreaterThan(0));
+    expect(screen.queryByText(SHOWN_BEFORE)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /new address/i })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /next address/i }));
     await screen.findByText(/unused address · index 1/i);
     await waitFor(() => expect(core.kept).toContain(1));
+    expect(screen.queryByText(SHOWN_BEFORE)).not.toBeInTheDocument();
+  });
+
+  /** The vault remembers what an earlier run showed: after a restart,
+      the page still offers the first unused address, and says it was
+      shown. */
+  it("offers the first unused address shown in an earlier run, and says so", async () => {
+    walletIpc(revealingCore(0).handlers);
+    await openReceive();
+    expect(await screen.findByText(SHOWN_BEFORE)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /new address/i })).toBeInTheDocument();
+  });
+
+  /** Seen with "Next address", or on an earlier visit to the page: it
+      counts as shown, wherever the page showed it. */
+  it("says so of an address seen earlier in the visit or on a visit before", async () => {
+    walletIpc(revealingCore(-1).handlers);
+    const user = await openReceive();
+    await user.click(screen.getByRole("button", { name: /next address/i }));
+    await screen.findByText(/unused address · index 1/i);
+    await user.click(screen.getByRole("button", { name: /first unused/i }));
+    await screen.findByText(/next unused address · index 0/i);
+    expect(await screen.findByText(SHOWN_BEFORE)).toBeInTheDocument();
+
+    await user.click(sidebar().getByRole("button", { name: "Overview" }));
+    await user.click(sidebar().getByRole("button", { name: "Receive" }));
+    await screen.findByText(/next unused address · index 0/i);
+    expect(await screen.findByText(SHOWN_BEFORE)).toBeInTheDocument();
+  });
+
+  /** A payment the core finds, even one still in the mempool, takes the
+      address out of its list: the page moves on to the next one nobody
+      paid, never shown, so with no note. */
+  it("moves past the shown address once a payment reaches it", async () => {
+    let paid = false;
+    walletIpc({
+      receive_addresses: (args) =>
+        receiveEntries(Number(args.lookahead ?? 0) + 1).slice(paid ? 1 : 0),
+    });
+    const user = await openReceive();
+    paid = true;
+    const sync = await sidebar().findByRole("button", { name: "Sync all" });
+    await waitFor(() => expect(sync).toBeEnabled());
+    await user.click(sync);
+    expect(await screen.findByText(/next unused address · index 1/i)).toBeInTheDocument();
+    expect(screen.queryByText(SHOWN_BEFORE)).not.toBeInTheDocument();
   });
 
   /** The page starts at the oldest unused address, which an earlier
       visit may already have handed out: "New address" goes to the first
-      one never shown, a newer one each time. */
-  it("moves to the first address never shown, a newer one each time", async () => {
+      one never shown, which needs no note and no other way out. */
+  it("moves to the first address never shown", async () => {
     walletIpc(revealingCore(3).handlers);
     const user = await openReceive();
 
     await user.click(await screen.findByRole("button", { name: /new address/i }));
     expect(await screen.findByText(/unused address · index 4/i)).toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: /new address/i }));
-    expect(await screen.findByText(/unused address · index 5/i)).toBeInTheDocument();
+    expect(screen.queryByText(SHOWN_BEFORE)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /new address/i })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /first unused/i }));
     expect(await screen.findByText(/next unused address · index 0/i)).toBeInTheDocument();
+    expect(screen.getByText(SHOWN_BEFORE)).toBeInTheDocument();
   });
 
   /** An address looked at with "Next address" may have been copied and
