@@ -44,9 +44,11 @@ export function useFiatValue(sats: number): string | null {
 }
 
 /** The fade of a fiat line that arrives with the price, after the page
-    waited for it. A value that changes keeps its line and is replaced
-    at once; turning the display on or showing balances again is the
-    reader's own gesture, not an arrival, and cuts. */
+    waited for it (the display just turned on with no price yet counts).
+    A value that changes keeps its line and is replaced at once; hiding
+    balances or turning the display off takes the line away at once,
+    and showing balances again over a price already known is no arrival
+    either: both cut. */
 function useFiatArrival(fiat: string | null): string {
   const { fiatEnabled, masked } = useUi();
   const [awaited, setAwaited] = useState(false);

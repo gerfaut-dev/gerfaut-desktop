@@ -52,9 +52,6 @@ export default function App() {
   const startup = useStartupFailure();
   const settings = useSettings();
   const locked = useLock((state) => state.locked);
-  // The lock comes at once, so nothing of the app shows through for a
-  // frame; once open, it leaves in a fade over the app it opened.
-  const lockCover = useExit(locked, "base");
   const lockSeen = useLock((state) => state.seen);
   const network = settings.data?.active_network;
   // Nothing of a wallet is asked for before the vault has said whether
@@ -85,6 +82,15 @@ export default function App() {
   // before the settings once drew the balances unmasked, "Hide amounts"
   // on, for the length of a round trip.
   const [prefsReady, setPrefsReady] = useState(false);
+  // The lock comes at once, so nothing of the app shows through for a
+  // frame; once open, it leaves in a fade over the app it opened. The
+  // app opens a moment later, once its wallets are read: the cover
+  // holds until then, so the fade runs over the app and not over the
+  // "Opening vault…" line before it.
+  const [unlocking, setUnlocking] = useState(false);
+  if (locked && !unlocking) setUnlocking(true);
+  if (!locked && unlocking && !wallets.isPending && prefsReady) setUnlocking(false);
+  const lockCover = useExit(locked || unlocking, "base");
   const autosynced = useRef(false);
   const wasLocked = useRef(false);
   const client = useQueryClient();
