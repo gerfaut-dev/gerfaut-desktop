@@ -20,6 +20,17 @@ describe("WelcomeTour", () => {
     expect(screen.getByRole("button", { name: "Next" })).toBeInTheDocument();
   });
 
+  it("shows one page's mark and words at a time, however far it goes", async () => {
+    const { user } = renderTour();
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    const dialog = screen.getByRole("dialog");
+    // One disc in the slot, one heading: no page left behind.
+    expect(dialog.querySelectorAll(".size-16")).toHaveLength(1);
+    expect(dialog.querySelectorAll("h2")).toHaveLength(1);
+    expect(screen.queryByText("Add a wallet")).not.toBeInTheDocument();
+  });
+
   it("takes the second page back to the first, Skip still within reach", async () => {
     const { user } = renderTour();
     await user.click(screen.getByRole("button", { name: "Next" }));

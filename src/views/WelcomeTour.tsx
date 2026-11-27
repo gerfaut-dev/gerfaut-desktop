@@ -74,12 +74,12 @@ export function WelcomeTour({
             disc: every page keeps the same 64px slot, so the dialog
             does not jump. */}
         {step === 0 ? (
-          <span key={step} className={turn}>
+          <span key={`mark-${step}`} className={turn}>
             <Lockup label="Gerfaut" width={100} />
           </span>
         ) : (
           <span
-            key={step}
+            key={`mark-${step}`}
             className={`flex size-16 items-center justify-center rounded-full bg-sunken text-primary ${turn}`}
           >
             {current.icon}
@@ -88,7 +88,7 @@ export function WelcomeTour({
         {/* As tall as the longest page's words: the dots and the
             buttons under them stay where they are from a page to the
             next, under a pointer that presses Next four times. */}
-        <div key={step} className={`flex min-h-36 flex-col items-center gap-5 ${turn}`}>
+        <div key={`words-${step}`} className={`flex min-h-36 flex-col items-center gap-5 ${turn}`}>
           <h2 className="text-balance font-display text-2xl font-semibold text-text">
             {current.title}
           </h2>
