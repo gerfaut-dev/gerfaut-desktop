@@ -892,8 +892,8 @@ async fn fetch_price_history(
     Ok(state.manager.fetch_price_history(range).await?)
 }
 
-/// The repository whose releases the app compares itself with.
-const RELEASES_REPO: &str = "gerfaut-wallet/gerfaut-desktop";
+/// The file of the site the app reads its latest release from.
+const RELEASES: gerfaut_core::updates::ReleaseFeed = gerfaut_core::updates::ReleaseFeed::Desktop;
 
 /// The version this build runs, the one the core compares releases with.
 fn running_version(app: &tauri::AppHandle) -> String {
@@ -921,7 +921,7 @@ async fn update_session(
     state.unlocked()?;
     Ok(state
         .manager
-        .update_session(RELEASES_REPO, &running_version(&app))
+        .update_session(RELEASES, &running_version(&app))
         .await)
 }
 
@@ -937,7 +937,7 @@ async fn check_update(
     state.unlocked()?;
     Ok(state
         .manager
-        .check_update(RELEASES_REPO, &running_version(&app))
+        .check_update(RELEASES, &running_version(&app))
         .await?)
 }
 

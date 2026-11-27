@@ -17,7 +17,7 @@ export const BETA = APP_VERSION.startsWith("0.");
 
 /** Where a problem is reported: the issues of this repository, the one
     other address the About card opens. */
-export const ISSUES_URL = "https://github.com/gerfaut-wallet/gerfaut-desktop/issues";
+export const ISSUES_URL = "https://github.com/gerfaut-dev/gerfaut-desktop/issues";
 
 /** What Gerfaut sends and to whom, on the site. */
 export const PRIVACY_URL = "https://gerfaut-wallet.com/privacy";
@@ -31,7 +31,7 @@ export const PRIVACY_URL = "https://gerfaut-wallet.com/privacy";
     A newer release already known, from the daily check or from an
     earlier press of the button, is offered as soon as the card opens:
     this is where the update notice sends people. Which release that is
-    comes from the core. The download button opens the releases page
+    comes from the core. The download button opens the download page
     this app names itself, never an address the network answered.
 
     The check takes the route the syncs take, so with an onion backend
@@ -88,7 +88,7 @@ export function AboutSection() {
               {available
                 ? `Gerfaut ${available} is available.`
                 : result === "failed"
-                  ? "Could not reach the release page."
+                  ? "Could not check for updates."
                   : result === "current"
                     ? "You are up to date."
                     : ""}
@@ -139,7 +139,7 @@ export function AboutSection() {
         <div>
           <SettingRow
             title="Check for updates automatically"
-            hint="Asks GitHub for the latest release at most once a day while Gerfaut is unlocked, through Tor when a backend is an onion address, and downloads nothing."
+            hint="Asks gerfaut-wallet.com for the latest version at most once a day while Gerfaut is unlocked, through Tor when a backend is an onion address, and downloads nothing."
           >
             {auto === null ? (
               // The switch's room, kept so the row does not move when

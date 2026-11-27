@@ -1,7 +1,7 @@
 //! The pages Gerfaut links to, opened in the browser.
 //!
 //! The window names the page and this side opens it, or refuses: it
-//! opens the explorer page of a transaction, the releases page, the
+//! opens the explorer page of a transaction, the download page, the
 //! issues page, the privacy policy and the page a price source's credit
 //! links to, and no
 //! other address, whatever a page gone wrong asks for. The address
@@ -22,10 +22,11 @@
 
 use crate::{CommandError, CommandResult};
 
-/// The releases page: the update check and Settings › About send there.
-const RELEASES: &str = "https://github.com/gerfaut-wallet/gerfaut-desktop/releases/latest";
+/// The download page of the site: the update notice and Settings ›
+/// About send there.
+const RELEASES: &str = "https://gerfaut-wallet.com/download";
 /// The issues of this repository, behind "Report a problem".
-const ISSUES: &str = "https://github.com/gerfaut-wallet/gerfaut-desktop/issues";
+const ISSUES: &str = "https://github.com/gerfaut-dev/gerfaut-desktop/issues";
 /// The privacy policy on the site, behind its button in Settings › About.
 const PRIVACY: &str = "https://gerfaut-wallet.com/privacy";
 /// A transaction on the explorer, by network: one of these, then its
@@ -266,9 +267,13 @@ mod tests {
             &format!("https://mempool.space/regtest/tx/{TXID}"),
             "https://mempool.space/address/bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
             "https://github.com/someone/else/releases/latest",
-            "https://github.com/gerfaut-wallet/gerfaut-desktop/releases/latest/other",
-            "https://github.com/gerfaut-wallet/gerfaut-desktop/issues/new",
-            "https://github.com/gerfaut-wallet/gerfaut-desktop/issues?q=evil",
+            "https://github.com/gerfaut-dev/gerfaut-desktop/releases/latest",
+            "https://gerfaut-wallet.com/download/evil",
+            "https://gerfaut-wallet.com/download?evil",
+            "https://gerfaut-wallet.com/download#evil",
+            "http://gerfaut-wallet.com/download",
+            "https://github.com/gerfaut-dev/gerfaut-desktop/issues/new",
+            "https://github.com/gerfaut-dev/gerfaut-desktop/issues?q=evil",
             "https://github.com/someone/else/issues",
             "https://gerfaut-wallet.com/",
             "https://gerfaut-wallet.com/privacy/evil",

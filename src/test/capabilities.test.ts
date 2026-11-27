@@ -40,7 +40,7 @@ describe("permissions of the window", () => {
 
 /** What the window can make the system open is a short list the app's
     own command holds, not any address a page gone wrong could name:
-    the explorer, the releases page, the issues page, the privacy
+    the explorer, the download page, the issues page, the privacy
     policy, and the page a price source's credit links to. The opener plugin's own command,
     which would open any address its scope lets through, is out of
     reach. The refusals are tested in src-tauri/src/links.rs. */
