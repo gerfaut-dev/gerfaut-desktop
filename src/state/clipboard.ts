@@ -17,10 +17,12 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ipc } from "../lib/ipc";
+import { motionMs } from "../lib/motion";
 import { useUi } from "./store";
 
-/** How long the button shows its check mark, as the address chip does. */
-const COPIED_FOR_MS = 1500;
+/** How long the button shows its check mark, as the address chip does:
+    the `hold` motion token. */
+const COPIED_FOR_MS = motionMs.hold;
 
 /** What a copy came to: on the clipboard for good, on it until the
     seconds run out, or refused. `unguarded` is a secret that went to

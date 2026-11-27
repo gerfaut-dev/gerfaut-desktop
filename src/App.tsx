@@ -38,6 +38,7 @@ import { BackendRefusalNotice, CertificateAsk } from "./views/settings/BackendSe
 import { TransactionsView } from "./views/TransactionsView";
 import { TxDetailModal } from "./views/TxDetailModal";
 import { UtxosView } from "./views/UtxosView";
+import { useExit } from "./lib/motion";
 
 /** The queries the lock leaves in the cache: the settings, cut down
     below, and the constants of the build. */
@@ -51,6 +52,9 @@ export default function App() {
   const startup = useStartupFailure();
   const settings = useSettings();
   const locked = useLock((state) => state.locked);
+  // The lock comes at once, so nothing of the app shows through for a
+  // frame; once open, it leaves in a fade over the app it opened.
+  const lockCover = useExit(locked, "base");
   const lockSeen = useLock((state) => state.seen);
   const network = settings.data?.active_network;
   // Nothing of a wallet is asked for before the vault has said whether
@@ -265,6 +269,14 @@ export default function App() {
     // page is a credit layer: its slot sits under the canvas, and each
     // modal over it is a layer of its own.
     <CreditLayer>
+      {lockCover.leaving && (
+        <div
+          aria-hidden
+          className="pointer-events-none fixed inset-0 z-[200] bg-shell p-2 animate-fade-out"
+        >
+          <div className="h-full rounded-[var(--radius-canvas)] bg-background shadow-canvas" />
+        </div>
+      )}
       <div className="flex h-full bg-shell">
         <Sidebar
           wallets={walletList}

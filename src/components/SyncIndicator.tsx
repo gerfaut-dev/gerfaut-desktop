@@ -4,6 +4,7 @@ import { relativeTime } from "../lib/format";
 import { freshnessOf, phaseOf } from "../lib/syncState";
 import type { Freshness, WalletSyncStatus } from "../lib/syncState";
 import { useNow } from "../state/clock";
+import { useFadeOnChange } from "../lib/motion";
 import { useUi } from "../state/store";
 
 /** The glyph of a sync to look at, wherever a line dates the data:
@@ -74,6 +75,9 @@ export function SyncIndicator({
   // is not announced: nothing happened, and the date says it when read.
   // The words carry the baseline, not the glyph: a line that gains one
   // keeps its box, and the header under it does not move.
+  // A new state fades in on the spot. The element stays the same, so
+  // the live region inside it keeps being read out.
+  const fade = useFadeOnChange<HTMLSpanElement>(fresh.state);
   return (
     <span
       className={`inline-flex items-center gap-1.5 font-ui text-xs font-medium tracking-wide ${
@@ -82,7 +86,7 @@ export function SyncIndicator({
       title={sync.state === "failed" ? sync.message : undefined}
     >
       {warned && <SyncGlyph state={warned} />}
-      <span className="self-baseline">
+      <span ref={fade} className="self-baseline">
         <span aria-live="polite">{said}</span>
         {rest && ` ${rest}`}
       </span>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import tokens from "../styles/tokens.css?raw";
 
 export type MotionDuration = "fast" | "base" | "slow" | "turn" | "hold";
@@ -52,16 +52,18 @@ export function useSwap(state: unknown): string {
 }
 
 /** The loop of an action in progress: it keeps turning until the turn
-    under way is over, so the icon never snaps back mid-turn. Without
-    the animation (reduced motion) it stops at the next turn's time,
-    which shows nothing since the icon does not move. */
+    under way is over, so the icon never snaps back mid-turn: the end
+    of the turn is the animation's next iteration, or one full turn if
+    that event never comes. Under reduced motion it stops at once. */
 export function useSpin(active: boolean) {
   const [spinning, setSpinning] = useState(active);
   if (active && !spinning) setSpinning(true);
 
   useEffect(() => {
     if (active || !spinning) return;
-    const timer = setTimeout(() => setSpinning(false), motionMs.turn);
+    // Standing still, there is no turn to finish.
+    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const timer = setTimeout(() => setSpinning(false), still ? 0 : motionMs.turn);
     return () => clearTimeout(timer);
   }, [active, spinning]);
 
@@ -69,4 +71,23 @@ export function useSpin(active: boolean) {
     spinning: active || spinning,
     onAnimationIteration: active ? undefined : () => setSpinning(false),
   };
+}
+
+const EASE = /--motion-ease:\s*([^;]+);/.exec(tokens)?.[1];
+
+/** The fade on the spot for a block that must stay the same element
+    (a live region is only read out reliably if it is not replaced):
+    it replays the fade on the element itself when `state` changes. */
+export function useFadeOnChange<T extends Element>(state: unknown) {
+  const ref = useRef<T>(null);
+  const last = useRef(state);
+  useEffect(() => {
+    if (Object.is(last.current, state)) return;
+    last.current = state;
+    ref.current?.animate?.([{ opacity: 0 }, { opacity: 1 }], {
+      duration: motionMs.base,
+      easing: EASE,
+    });
+  }, [state]);
+  return ref;
 }

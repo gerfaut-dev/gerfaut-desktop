@@ -329,5 +329,14 @@ export function applyTheme(theme: ThemePref) {
     (theme === "system" &&
       typeof window !== "undefined" &&
       window.matchMedia?.("(prefers-color-scheme: dark)").matches);
-  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  const root = document.documentElement;
+  const next = dark ? "dark" : "light";
+  if (root.dataset.theme === next) return;
+  // Every transition is cut for the frame of the switch (tokens.css),
+  // or each colour would leave at its own pace. The style is computed
+  // once with the new theme before the cut is lifted on the next frame.
+  root.classList.add("theme-switching");
+  root.dataset.theme = next;
+  void getComputedStyle(root).color;
+  requestAnimationFrame(() => root.classList.remove("theme-switching"));
 }
