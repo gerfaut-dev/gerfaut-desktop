@@ -35,7 +35,7 @@ export function TxList({ txs }: { txs: TxSummary[] }) {
               onClick={() => selectTx(selected ? null : tx.txid)}
               aria-haspopup="dialog"
               className={clsx(
-                "group flex min-h-12 w-full cursor-pointer items-center gap-3 px-3 py-1.5 text-left transition-colors duration-100",
+                "group flex min-h-12 w-full cursor-pointer items-center gap-3 px-3 py-1.5 text-left transition-colors",
                 selected ? "bg-sunken" : "hover:bg-sunken/60",
               )}
             >
@@ -62,7 +62,7 @@ export function TxList({ txs }: { txs: TxSummary[] }) {
               <span className="flex shrink-0 items-center gap-1 text-muted">
                 <span
                   aria-hidden
-                  className="hidden font-ui text-[11px] font-medium opacity-0 transition-opacity duration-150 group-hover:opacity-100 lg:block"
+                  className="hidden font-ui text-[11px] font-medium opacity-0 transition-opacity group-hover:opacity-100 lg:block"
                 >
                   Details
                 </span>
@@ -71,7 +71,7 @@ export function TxList({ txs }: { txs: TxSummary[] }) {
                   strokeWidth={1.5}
                   aria-hidden
                   className={clsx(
-                    "transition-opacity duration-150",
+                    "transition-opacity",
                     selected ? "opacity-100" : "opacity-60 group-hover:opacity-100",
                   )}
                 />

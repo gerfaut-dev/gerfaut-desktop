@@ -40,7 +40,7 @@ export function NetworkSection({ settings }: { settings: Settings }) {
                   }
                 }}
                 className={clsx(
-                  "cursor-pointer rounded-md border p-3 text-left transition-colors duration-150",
+                  "cursor-pointer rounded-md border p-3 text-left transition-colors",
                   selected
                     ? "border-primary bg-sunken"
                     : "border-border hover:bg-sunken/60",

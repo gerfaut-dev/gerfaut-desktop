@@ -70,7 +70,7 @@ export function SettingsNav({
                 onClick={() => onSelect(id)}
                 className={clsx(
                   "relative flex w-full cursor-pointer items-center gap-2.5 whitespace-nowrap rounded-md px-3 py-2 text-left font-ui text-sm font-medium",
-                  "transition-colors duration-150",
+                  "transition-colors",
                   current
                     ? "bg-sunken text-text"
                     : "text-muted hover:bg-sunken/60 hover:text-text",

@@ -49,7 +49,7 @@ function SelectTrigger({
           size={size === "md" ? 16 : 14}
           strokeWidth={1.5}
           aria-hidden
-          className="shrink-0 text-muted transition-transform duration-150 group-data-[state=open]/select:rotate-180"
+          className="shrink-0 text-muted motion-safe:transition-transform group-data-[state=open]/select:rotate-180"
         />
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
@@ -78,7 +78,7 @@ function SelectContent({
         className={cn(
           "relative z-[100] max-h-[min(320px,var(--radix-select-content-available-height))] min-w-[220px] overflow-hidden",
           "rounded-lg border border-border bg-surface shadow-overlay",
-          "motion-safe:animate-[menu-in_150ms_ease-out]",
+          "data-[state=open]:animate-menu-in data-[state=closed]:animate-menu-out",
           className,
         )}
         {...props}
@@ -127,7 +127,7 @@ function SelectItem({
       data-slot="select-item"
       textValue={textValue ?? (typeof children === "string" ? children : undefined)}
       className={cn(
-        "flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left outline-none transition-colors duration-100",
+        "flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left outline-none transition-colors",
         "data-[highlighted]:bg-sunken/70 data-[state=checked]:not-data-[highlighted]:bg-sunken/50",
         "data-[disabled]:cursor-not-allowed data-[disabled]:opacity-45",
         className,

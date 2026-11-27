@@ -1,5 +1,6 @@
 import { CircleArrowUp } from "lucide-react";
 import { useEffect, useRef } from "react";
+import { useSwap } from "../lib/motion";
 import { useUi } from "../state/store";
 import { useUpdate } from "../state/update";
 import { APP_VERSION } from "../views/settings/AboutSection";
@@ -42,6 +43,8 @@ export function UpdateNotice() {
     return () => document.removeEventListener("keydown", onKey);
   }, [shown]);
 
+  const arrive = useSwap(shown);
+
   if (!shown) return null;
 
   const open = () => {
@@ -55,7 +58,7 @@ export function UpdateNotice() {
     <section
       ref={ref}
       aria-label="Update available"
-      className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-surface px-6 py-2"
+      className={`flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-surface px-6 py-2 ${arrive}`}
     >
       <div className="flex min-w-0 flex-1 items-center gap-2.5">
         <span className="flex h-5 shrink-0 items-center text-muted">

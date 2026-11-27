@@ -33,6 +33,12 @@ export function Modal({
   closable?: boolean;
 }) {
   const previous = useRef<Element | null>(null);
+  // What it showed last, kept while it leaves: a caller resets its
+  // state as it closes (a step, a selection), and the fading dialog
+  // would show its first step or "Loading…" on the way out.
+  const kept = useRef({ title, children });
+  if (open) kept.current = { title, children };
+  const shown = open ? { title, children } : kept.current;
 
   // Taken before the content mounts (the portal lands it one render
   // later): a field marked autoFocus grabs the focus as soon as it is
@@ -91,7 +97,7 @@ export function Modal({
       >
         <header className="flex items-center justify-between border-b border-border px-6 py-4">
           <DialogTitle asChild>
-            <h1>{title}</h1>
+            <h1>{shown.title}</h1>
           </DialogTitle>
           <DialogClose asChild>
             <IconButton label="Close" disabled={!closable}>
@@ -102,7 +108,7 @@ export function Modal({
         {/* A layer of its own: a price shown here is credited here,
             and the page's credit waits under the dim. */}
         <CreditLayer>
-          <div className="max-h-[76vh] overflow-y-auto px-6 py-5">{children}</div>
+          <div className="max-h-[76vh] overflow-y-auto px-6 py-5">{shown.children}</div>
           <CreditSlot className="border-t border-border px-6 py-2 text-right" />
         </CreditLayer>
       </DialogContent>

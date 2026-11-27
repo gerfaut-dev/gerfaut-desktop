@@ -337,8 +337,8 @@ export function ScanQrModal({
               </div>
               <div className="h-1 overflow-hidden rounded-full bg-white/20">
                 <div
-                  className="h-full rounded-full bg-white transition-[width] duration-200"
-                  style={{ width: `${(100 * progress.received) / progress.total}%` }}
+                  className="h-full origin-left bg-white motion-safe:transition-transform duration-fast"
+                  style={{ transform: `scaleX(${progress.received / progress.total})` }}
                 />
               </div>
             </div>

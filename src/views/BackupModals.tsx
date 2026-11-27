@@ -330,7 +330,7 @@ export function BackupExportModal({
             passphrase, several words.
           </p>
           {problem && (
-            <p role="alert" className="font-ui text-xs text-muted">
+            <p role="alert" className="animate-swap font-ui text-xs text-muted">
               {problem}
             </p>
           )}
@@ -582,7 +582,7 @@ export function BackupRestoreModal({
             }}
           />
           {problem && (
-            <p role="alert" className="font-ui text-xs text-muted">
+            <p role="alert" className="animate-swap font-ui text-xs text-muted">
               {problem}
             </p>
           )}
@@ -692,7 +692,7 @@ export function BackupRestoreModal({
             </div>
           )}
           {problem && (
-            <p role="alert" className="font-ui text-xs text-muted">
+            <p role="alert" className="animate-swap font-ui text-xs text-muted">
               {problem}
             </p>
           )}

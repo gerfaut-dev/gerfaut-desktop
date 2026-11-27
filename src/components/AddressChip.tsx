@@ -1,6 +1,7 @@
 import { clsx } from "clsx";
 import { Check, Copy } from "lucide-react";
 import { truncateMiddle } from "../lib/format";
+import { useSwap } from "../lib/motion";
 import { useClipboard } from "../state/clipboard";
 
 /** Inline identifier chip: mono, middle-truncated, click to copy with
@@ -34,6 +35,7 @@ export function AddressChip({
 }) {
   const clipboard = useClipboard();
   const copied = clipboard.copied;
+  const swap = useSwap(copied);
   const copy = () => void clipboard.copy(value);
   // Where the tail starts, for `fit`: counted from the length, so a
   // value no longer than its tail is the tail alone, whole.
@@ -46,7 +48,7 @@ export function AddressChip({
       title={value}
       aria-label={label ? `Copy ${label}` : undefined}
       className={clsx(
-        "inline-flex cursor-pointer items-center gap-1.5 rounded-sm px-2 py-1 font-data text-[13px] transition-colors duration-150",
+        "inline-flex cursor-pointer items-center gap-1.5 rounded-sm px-2 py-1 font-data text-[13px] transition-colors",
         fit && "max-w-full",
         emphasis
           ? "bg-primary/10 font-medium text-text"
@@ -62,9 +64,9 @@ export function AddressChip({
         truncateMiddle(value, head, tail)
       )}
       {copied ? (
-        <Check size={14} strokeWidth={1.5} aria-hidden className="shrink-0 text-confirmed" />
+        <Check size={14} strokeWidth={1.5} aria-hidden className={`shrink-0 text-confirmed ${swap}`} />
       ) : (
-        <Copy size={14} strokeWidth={1.5} aria-hidden className="shrink-0" />
+        <Copy size={14} strokeWidth={1.5} aria-hidden className={`shrink-0 ${swap}`} />
       )}
     </button>
   );

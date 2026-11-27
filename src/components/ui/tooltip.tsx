@@ -36,7 +36,7 @@ function TooltipContent({
         className={cn(
           "z-[100] max-w-xs break-words rounded-md border border-border bg-surface px-2 py-1",
           "font-ui text-xs font-medium text-text shadow-overlay",
-          "motion-safe:animate-[menu-in_150ms_ease-out]",
+          "data-[state=closed]:animate-menu-out data-[state=delayed-open]:animate-menu-in data-[state=instant-open]:animate-menu-in",
           className,
         )}
         {...props}

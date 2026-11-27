@@ -1,4 +1,5 @@
 import { FileDown } from "lucide-react";
+import { useSwap } from "../lib/motion";
 import { useState } from "react";
 import { Button } from "../components/Button";
 import { LoadFailure } from "../components/LoadFailure";
@@ -67,13 +68,18 @@ export function ExportView({ walletId }: { walletId: string }) {
   const [toDay, setToDay] = useState("");
   const [direction, setDirection] = useState<DirectionChoice>("all");
   const [includePending, setIncludePending] = useState(true);
+  // Loading, failed or read: each state fades in where the last stood.
+  const arrive = useSwap(
+    snapshot.isPending ? "loading" : snapshot.isError || !snapshot.data ? "failed" : "read",
+  );
 
   if (snapshot.isPending) {
-    return <p className="py-4 font-ui text-sm text-muted">Loading wallet…</p>;
+    return <p className={`py-4 font-ui text-sm text-muted ${arrive}`}>Loading wallet…</p>;
   }
   if (snapshot.isError || !snapshot.data) {
     return (
       <LoadFailure
+        className={arrive}
         what="This wallet"
         error={snapshot.error}
         retrying={snapshot.isFetching}
@@ -109,7 +115,7 @@ export function ExportView({ walletId }: { walletId: string }) {
   };
 
   return (
-    <div className="pb-8">
+    <div className={`pb-8 ${arrive}`}>
       <PageHeader title="Export" sub="Everything stays on this machine." />
 
       <div className="rounded-lg border border-border bg-surface p-6">

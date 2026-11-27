@@ -176,7 +176,7 @@ export function DropLine({ y }: { y: number | null }) {
   return (
     <span
       aria-hidden
-      className="pointer-events-none absolute inset-x-0 top-0 h-0.5 rounded-full bg-primary motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out"
+      className="pointer-events-none absolute inset-x-0 top-0 h-0.5 rounded-full bg-primary motion-safe:transition-transform"
       style={{ transform: `translateY(${y - 1}px)` }}
     />
   );

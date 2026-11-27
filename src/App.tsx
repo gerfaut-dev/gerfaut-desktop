@@ -38,6 +38,7 @@ import { BackendRefusalNotice, CertificateAsk } from "./views/settings/BackendSe
 import { TransactionsView } from "./views/TransactionsView";
 import { TxDetailModal } from "./views/TxDetailModal";
 import { UtxosView } from "./views/UtxosView";
+import { useExit } from "./lib/motion";
 
 /** The queries the lock leaves in the cache: the settings, cut down
     below, and the constants of the build. */
@@ -81,6 +82,15 @@ export default function App() {
   // before the settings once drew the balances unmasked, "Hide amounts"
   // on, for the length of a round trip.
   const [prefsReady, setPrefsReady] = useState(false);
+  // The lock comes at once, so nothing of the app shows through for a
+  // frame; once open, it leaves in a fade over the app it opened. The
+  // app opens a moment later, once its wallets are read: the cover
+  // holds until then, so the fade runs over the app and not over the
+  // "Opening vault…" line before it.
+  const [unlocking, setUnlocking] = useState(false);
+  if (locked && !unlocking) setUnlocking(true);
+  if (!locked && unlocking && !wallets.isPending && prefsReady) setUnlocking(false);
+  const lockCover = useExit(locked || unlocking, "base");
   const autosynced = useRef(false);
   const wasLocked = useRef(false);
   const client = useQueryClient();
@@ -265,6 +275,14 @@ export default function App() {
     // page is a credit layer: its slot sits under the canvas, and each
     // modal over it is a layer of its own.
     <CreditLayer>
+      {lockCover.leaving && (
+        <div
+          aria-hidden
+          className="pointer-events-none fixed inset-0 z-[200] bg-shell p-2 animate-fade-out"
+        >
+          <div className="h-full rounded-[var(--radius-canvas)] bg-background shadow-canvas" />
+        </div>
+      )}
       <div className="flex h-full bg-shell">
         <Sidebar
           wallets={walletList}

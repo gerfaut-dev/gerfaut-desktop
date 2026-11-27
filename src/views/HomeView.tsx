@@ -1,4 +1,5 @@
 import { clsx } from "clsx";
+import { useSwap } from "../lib/motion";
 import {
   Archive,
   ArrowLeftRight,
@@ -68,13 +69,18 @@ export function HomeView({ walletId }: { walletId: string }) {
   // The failure of this wallet's last sync, still said while it syncs
   // again.
   const failure = failureOf(sync);
+  // Loading, failed or read: each state fades in where the last stood.
+  const arrive = useSwap(
+    snapshot.isPending ? "loading" : snapshot.isError || !snapshot.data ? "failed" : "read",
+  );
 
   if (snapshot.isPending) {
-    return <p className="py-4 font-ui text-sm text-muted">Loading wallet…</p>;
+    return <p className={`py-4 font-ui text-sm text-muted ${arrive}`}>Loading wallet…</p>;
   }
   if (snapshot.isError || !snapshot.data) {
     return (
       <LoadFailure
+        className={arrive}
         what="This wallet"
         error={snapshot.error}
         retrying={snapshot.isFetching}
@@ -90,7 +96,7 @@ export function HomeView({ walletId }: { walletId: string }) {
   return (
     // The page measures itself, not the window: the two columns hold
     // down to the narrowest window with the sidebar open.
-    <div className="@container flex h-full min-h-[560px] flex-col pb-2">
+    <div className={`@container flex h-full min-h-[560px] flex-col pb-2 ${arrive}`}>
       {/* No freshness line here: Watch status carries it below. */}
       <PageHeader heading={<WalletTitle key={meta.id} meta={meta} />} />
 
@@ -263,7 +269,7 @@ function WalletTitle({ meta }: { meta: WalletMeta }) {
             onClick={begin}
             aria-label={`Rename ${name}`}
             className={clsx(
-              "group inline-flex max-w-full cursor-pointer items-center gap-2 text-left transition-colors duration-150",
+              "group inline-flex max-w-full cursor-pointer items-center gap-2 text-left transition-colors",
               "hover:bg-sunken/60 focus-visible:bg-sunken/60",
               TITLE_BOX,
             )}
@@ -273,7 +279,7 @@ function WalletTitle({ meta }: { meta: WalletMeta }) {
               size={16}
               strokeWidth={1.5}
               aria-hidden
-              className="shrink-0 text-muted opacity-0 transition-opacity duration-150 group-hover:opacity-60 group-focus-visible:opacity-60"
+              className="shrink-0 text-muted opacity-0 transition-opacity group-hover:opacity-60 group-focus-visible:opacity-60"
             />
           </button>
         )}
@@ -351,10 +357,13 @@ function BalanceCard({
   // The policy in the grammar of the counts: "1 key", "2 of 3 keys",
   // "Recovery in 142 days". Until it is in, the row is only its name.
   const digest = policy.data ? policyDigest(policy.data) : { figure: "Policy", label: "" };
+  const arrive = useSwap(firstSync);
   return (
     <Card label="Total balance" className="flex-1">
       <div className="flex h-full flex-col">
-        {firstSync && !masked ? <BalanceUnknown /> : <Balance sats={balance.total} />}
+        <div key={String(firstSync)} className={arrive}>
+          {firstSync && !masked ? <BalanceUnknown /> : <Balance sats={balance.total} />}
+        </div>
         {note ? (
           <p className="mt-2 font-ui text-xs text-muted">{note}</p>
         ) : (
@@ -416,7 +425,7 @@ function LinkRow({
     <button
       type="button"
       onClick={onClick}
-      className="group flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors duration-150 hover:bg-sunken/60"
+      className="group flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-sunken/60"
     >
       <span className="text-muted">{icon}</span>
       <span className="font-ui text-[13px] text-text">
@@ -433,7 +442,7 @@ function LinkRow({
         size={14}
         strokeWidth={1.5}
         aria-hidden
-        className="ml-auto text-muted opacity-60 transition-opacity duration-150 group-hover:opacity-100"
+        className="ml-auto text-muted opacity-60 transition-opacity group-hover:opacity-100"
       />
     </button>
   );
@@ -468,6 +477,7 @@ function PriceCard() {
   const points = answer?.points ?? [];
   const first = points[0];
   const last = points[points.length - 1];
+  const arrive = useSwap(last === undefined);
   // The price on screen is the source's: the screen credits it.
   useCreditFor(fiatEnabled && last ? answer?.source : null);
   const change = first && last ? ((last.rate - first.rate) / first.rate) * 100 : null;
@@ -502,7 +512,7 @@ function PriceCard() {
       }
     >
       {last ? (
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className={`flex flex-wrap items-center gap-2.5 ${arrive}`}>
           <span className="tabular text-[22px] font-semibold leading-tight text-text">
             {formatCurrency(last.rate, fiatCurrency, { maximumFractionDigits: 0 })}
           </span>
@@ -684,7 +694,7 @@ function StatusCard({
         <button
           type="button"
           onClick={() => openSettings("network")}
-          className="cursor-pointer rounded-md px-2 py-1 font-ui text-xs font-medium text-primary transition-colors duration-150 hover:bg-sunken"
+          className="cursor-pointer rounded-md px-2 py-1 font-ui text-xs font-medium text-primary transition-colors hover:bg-sunken"
         >
           Node settings →
         </button>
@@ -749,7 +759,7 @@ function ActivityCard({ snapshot, firstSync }: { snapshot: WalletSnapshot; first
           <button
             type="button"
             onClick={() => setView("transactions")}
-            className="cursor-pointer rounded-md px-2 py-1 font-ui text-xs font-medium text-primary transition-colors duration-150 hover:bg-sunken"
+            className="cursor-pointer rounded-md px-2 py-1 font-ui text-xs font-medium text-primary transition-colors hover:bg-sunken"
           >
             All transactions →
           </button>
@@ -781,7 +791,7 @@ function ActivityRow({ tx, onOpen }: { tx: TxSummary; onOpen: () => void }) {
       <button
         type="button"
         onClick={onOpen}
-        className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-1 py-1.5 text-left transition-colors duration-100 hover:bg-sunken/60"
+        className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-1 py-1.5 text-left transition-colors hover:bg-sunken/60"
       >
         <DirectionChip incoming={incoming} pending={pending} size="sm" />
         <span className="flex min-w-0 flex-1 flex-col">
@@ -801,7 +811,7 @@ function ActivityRow({ tx, onOpen }: { tx: TxSummary; onOpen: () => void }) {
           size={14}
           strokeWidth={1.5}
           aria-hidden
-          className="shrink-0 text-muted opacity-60 transition-opacity duration-150 group-hover:opacity-100"
+          className="shrink-0 text-muted opacity-60 transition-opacity group-hover:opacity-100"
         />
       </button>
     </li>

@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { renderSVG } from "uqr";
 
-/** How long each frame of an animated code stays on screen. */
+/** How long each frame of an animated code stays on screen. A data
+    rate, not a motion: it keeps running under reduced motion, or the
+    other device could never read the frames it has not seen. */
 export const FRAME_MS = 200;
 
 /** A code that may take several frames: they loop until the screen is

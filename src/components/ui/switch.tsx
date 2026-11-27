@@ -11,7 +11,7 @@ function Switch({ className, ...props }: React.ComponentProps<typeof SwitchPrimi
     <SwitchPrimitive.Root
       data-slot="switch"
       className={cn(
-        "relative h-6 w-11 cursor-pointer rounded-full transition-colors duration-150",
+        "relative h-6 w-11 cursor-pointer rounded-full transition-colors duration-base",
         "data-[state=checked]:bg-primary data-[state=unchecked]:bg-border",
         "disabled:cursor-not-allowed disabled:opacity-45",
         className,
@@ -24,7 +24,7 @@ function Switch({ className, ...props }: React.ComponentProps<typeof SwitchPrimi
         data-slot="switch-thumb"
         className={cn(
           "pointer-events-none absolute left-0.5 top-0.5 block size-5 rounded-full bg-white",
-          "shadow-[0_1px_2px_rgba(13,19,23,0.25)] transition-transform duration-150",
+          "shadow-[0_1px_2px_rgba(13,19,23,0.25)] motion-safe:transition-transform duration-base",
           "data-[state=checked]:translate-x-5",
         )}
       />

@@ -1,4 +1,5 @@
 import { ChevronDown } from "lucide-react";
+import { useSwap } from "../lib/motion";
 import { Button } from "../components/Button";
 import { LoadFailure } from "../components/LoadFailure";
 import { HeaderBalance, PageHeader } from "../components/PageHeader";
@@ -14,13 +15,18 @@ export function TransactionsView({ walletId }: { walletId: string }) {
   const snapshot = useSnapshot(walletId);
   const sync = useWalletSync(walletId);
   const loadMore = useLoadMoreHistory();
+  // Loading, failed or read: each state fades in where the last stood.
+  const arrive = useSwap(
+    snapshot.isPending ? "loading" : snapshot.isError || !snapshot.data ? "failed" : "read",
+  );
 
   if (snapshot.isPending) {
-    return <p className="py-4 font-ui text-sm text-muted">Loading wallet…</p>;
+    return <p className={`py-4 font-ui text-sm text-muted ${arrive}`}>Loading wallet…</p>;
   }
   if (snapshot.isError || !snapshot.data) {
     return (
       <LoadFailure
+        className={arrive}
         what="This wallet"
         error={snapshot.error}
         retrying={snapshot.isFetching}
@@ -32,7 +38,7 @@ export function TransactionsView({ walletId }: { walletId: string }) {
   const firstSync = isFirstSync(sync, meta);
 
   return (
-    <div className="flex h-full flex-col pb-2">
+    <div className={`flex h-full flex-col pb-2 ${arrive}`}>
       <PageHeader
         title="Transactions"
         count={txs.length}

@@ -8,6 +8,7 @@ import {
   RotateCcw,
   SkipForward,
 } from "lucide-react";
+import { useSwap } from "../lib/motion";
 import { clsx } from "clsx";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -88,6 +89,7 @@ export function ReceiveView({ walletId }: { walletId: string }) {
   );
   const list = useAddressList(walletId);
   const { copy: copyText, copied } = useClipboard();
+  const copySwap = useSwap(copied);
   const [qrOpen, setQrOpen] = useState(false);
 
   const entries = addresses.data ?? [];
@@ -169,6 +171,10 @@ export function ReceiveView({ walletId }: { walletId: string }) {
   const shownBefore = !oneAddress && visit.onScreen === onScreen && visit.shownBefore;
   const gapLimit = snapshot.data?.meta.gap_limit ?? 20;
   const gap = entry ? unusedBefore(entries, position) : 0;
+  // The address and the audit list each fade in where their loading
+  // line stood.
+  const arriveEntry = useSwap(entry ? "read" : addresses.isError ? "failed" : "loading");
+  const arriveList = useSwap(list.data ? "read" : list.isError ? "failed" : "loading");
 
   const copy = async () => {
     if (entry) await copyText(entry.address);
@@ -182,7 +188,7 @@ export function ReceiveView({ walletId }: { walletId: string }) {
         <p className="font-ui text-sm text-muted">Deriving address…</p>
       )}
       {addresses.isError && (
-        <p className="font-ui text-sm text-muted">
+        <p className={`font-ui text-sm text-muted ${arriveEntry}`}>
           The receive address could not be derived.
         </p>
       )}
@@ -190,7 +196,7 @@ export function ReceiveView({ walletId }: { walletId: string }) {
       <div className="flex flex-col gap-4">
         {entry && (
           <>
-            <div className="rounded-lg border border-border bg-surface p-6">
+            <div className={`rounded-lg border border-border bg-surface p-6 ${arriveEntry}`}>
               <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-stretch sm:gap-6">
                 {/* A QR code stays dark-on-light in every theme: scanners
                     expect it, and inverting hurts contrast for cameras.
@@ -199,7 +205,7 @@ export function ReceiveView({ walletId }: { walletId: string }) {
                   type="button"
                   onClick={() => setQrOpen(true)}
                   aria-label="Enlarge the address QR code"
-                  className="group relative shrink-0 cursor-zoom-in self-center rounded-lg border border-border bg-white p-2.5 transition-shadow duration-150 hover:shadow-[0_0_0_2px_var(--color-primary)] focus-visible:outline-none focus-visible:shadow-[0_0_0_2px_var(--color-primary)]"
+                  className="group relative shrink-0 cursor-zoom-in self-center rounded-lg border border-border bg-white p-2.5 transition-shadow hover:shadow-[0_0_0_2px_var(--color-primary)] focus-visible:outline-none focus-visible:shadow-[0_0_0_2px_var(--color-primary)]"
                 >
                   <div
                     aria-hidden
@@ -210,7 +216,7 @@ export function ReceiveView({ walletId }: { walletId: string }) {
                   />
                   <span
                     aria-hidden
-                    className="absolute bottom-1.5 right-1.5 inline-flex size-6 items-center justify-center rounded-md bg-white/90 text-[#0d1317] opacity-0 shadow-[0_1px_2px_rgba(13,19,23,0.25)] transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
+                    className="absolute bottom-1.5 right-1.5 inline-flex size-6 items-center justify-center rounded-md bg-white/90 text-[#0d1317] opacity-0 shadow-[0_1px_2px_rgba(13,19,23,0.25)] transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
                   >
                     <Maximize2 size={13} strokeWidth={1.75} />
                   </span>
@@ -266,11 +272,13 @@ export function ReceiveView({ walletId }: { walletId: string }) {
                   <div className="flex flex-wrap items-center gap-2">
                     <Button variant="primary" onClick={() => void copy()}>
                       {copied ? (
-                        <Check size={16} strokeWidth={1.5} aria-hidden />
+                        <Check size={16} strokeWidth={1.5} aria-hidden className={copySwap} />
                       ) : (
-                        <Copy size={16} strokeWidth={1.5} aria-hidden />
+                        <Copy size={16} strokeWidth={1.5} aria-hidden className={copySwap} />
                       )}
-                      {copied ? "Copied" : "Copy address"}
+                      <span key={String(copied)} className={copySwap}>
+                        {copied ? "Copied" : "Copy address"}
+                      </span>
                     </Button>
                     {!singleAddress && (
                       <>
@@ -355,17 +363,19 @@ export function ReceiveView({ walletId }: { walletId: string }) {
           <p className="font-ui text-sm text-muted">Loading addresses…</p>
         )}
         {list.isError && (
-          <p className="font-ui text-sm text-muted">The addresses could not be loaded.</p>
+          <p className={`font-ui text-sm text-muted ${arriveList}`}>The addresses could not be loaded.</p>
         )}
         {list.data && (
           <>
             <AddressCard
+              className={arriveList}
               title={singleAddress ? "Watched address" : "External"}
               hint={singleAddress ? undefined : "Receive addresses, in derivation order."}
               rows={list.data.external}
             />
             {!singleAddress && (
               <AddressCard
+                className={arriveList}
                 title="Change"
                 hint="Internal addresses used by outgoing transactions."
                 rows={list.data.internal}
@@ -392,11 +402,13 @@ function AddressCard({
   hint,
   rows,
   empty,
+  className,
 }: {
   title: string;
   hint?: string;
   rows: AddressRow[];
   empty?: string;
+  className?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const shown = expanded ? rows : rows.slice(0, FOLDED_ROWS);
@@ -404,7 +416,10 @@ function AddressCard({
   const used = rows.filter((row) => row.used).length;
 
   return (
-    <section aria-label={title} className="overflow-clip rounded-lg border border-border bg-surface">
+    <section
+      aria-label={title}
+      className={`overflow-clip rounded-lg border border-border bg-surface ${className ?? ""}`}
+    >
       <div className="flex items-baseline justify-between gap-3 px-3 pb-1 pt-3">
         <h2 className="flex items-baseline gap-2 font-ui text-sm font-semibold text-text">
           {title}
@@ -437,7 +452,7 @@ function AddressCard({
                 <tr
                   key={row.index}
                   className={clsx(
-                    "transition-colors duration-100 hover:bg-sunken/60 [&>td]:border-b [&>td]:border-border",
+                    "transition-colors hover:bg-sunken/60 [&>td]:border-b [&>td]:border-border",
                     // The last row's rule parts it from the control under
                     // it; with none, the card's own edge is enough.
                     rows.length <= FOLDED_ROWS && "last:[&>td]:border-b-0",
@@ -466,7 +481,7 @@ function AddressCard({
               type="button"
               onClick={() => setExpanded(!expanded)}
               aria-expanded={expanded}
-              className="flex w-full cursor-pointer items-center justify-center gap-1.5 px-4 py-2.5 font-ui text-xs font-medium text-muted transition-colors duration-150 hover:bg-sunken/60 hover:text-text"
+              className="flex w-full cursor-pointer items-center justify-center gap-1.5 px-4 py-2.5 font-ui text-xs font-medium text-muted transition-colors hover:bg-sunken/60 hover:text-text"
             >
               {expanded ? (
                 <>
