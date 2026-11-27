@@ -1,3 +1,4 @@
+import { SpinIcon } from "../../components/SpinIcon";
 import { CircleCheck, LoaderCircle, ScanLine, Server } from "lucide-react";
 import { clsx } from "clsx";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -936,12 +937,7 @@ function TestOutcome({
     return (
       <div className="mt-3 flex max-w-xl items-center gap-3">
         <p className="flex min-w-0 flex-1 items-center gap-2 font-ui text-sm text-muted">
-          <LoaderCircle
-            size={16}
-            strokeWidth={1.5}
-            aria-hidden
-            className="shrink-0 motion-safe:animate-spin"
-          />
+          <SpinIcon icon={LoaderCircle} active size={16} className="shrink-0" />
           {test.onion
             ? "Testing the connection through Tor. This can take a minute or two."
             : "Testing the connection…"}

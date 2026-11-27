@@ -46,7 +46,7 @@ export function AddressChip({
       title={value}
       aria-label={label ? `Copy ${label}` : undefined}
       className={clsx(
-        "inline-flex cursor-pointer items-center gap-1.5 rounded-sm px-2 py-1 font-data text-[13px] transition-colors duration-150",
+        "inline-flex cursor-pointer items-center gap-1.5 rounded-sm px-2 py-1 font-data text-[13px] transition-colors",
         fit && "max-w-full",
         emphasis
           ? "bg-primary/10 font-medium text-text"

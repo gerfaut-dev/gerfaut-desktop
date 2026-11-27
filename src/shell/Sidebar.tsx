@@ -34,6 +34,8 @@ import type { CanvasView } from "../state/store";
 import { useUi } from "../state/store";
 import { useWalletOrder } from "../state/walletOrder";
 import { useWalletSyncOf } from "../state/walletSync";
+import { useExit } from "../lib/motion";
+import { SpinIcon } from "../components/SpinIcon";
 import mark from "../assets/gerfaut-mark-accent-dark.svg";
 
 /** The wallet pages of the sidebar: one word, one icon, every wallet. */
@@ -115,7 +117,7 @@ export function Sidebar({
       aria-expanded={!collapsed}
       title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
       aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-      className="inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors duration-150 hover:bg-sunken/60 hover:text-text"
+      className="inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors hover:bg-sunken/60 hover:text-text"
     >
       {collapsed ? (
         <PanelLeftOpen size={17} strokeWidth={1.5} aria-hidden />
@@ -130,7 +132,7 @@ export function Sidebar({
       aria-label="Navigation"
       className={clsx(
         "shell-rail flex h-full shrink-0 flex-col text-text",
-        "motion-safe:transition-[width] motion-safe:duration-200 motion-safe:ease-out",
+        "motion-safe:transition-[width] motion-safe:duration-base",
         collapsed ? "w-16" : "w-[248px]",
       )}
     >
@@ -216,12 +218,7 @@ export function Sidebar({
           describedBy={collapsed && lines.length > 0 ? syncLineId : undefined}
           icon={
             <span className="relative inline-flex">
-              <RefreshCw
-                size={18}
-                strokeWidth={1.5}
-                aria-hidden
-                className={syncing ? "motion-safe:animate-spin" : undefined}
-              />
+              <SpinIcon icon={RefreshCw} active={syncing} size={18} />
               {/* Folded, the line below is gone: an old or failed sync
                   stays in sight as a mark on the icon, never as its
                   colour alone. */}
@@ -370,7 +367,7 @@ function NavItem({
       aria-describedby={describedBy}
       className={clsx(
         "group relative flex w-full cursor-pointer items-center rounded-md text-left font-ui text-sm font-medium",
-        "transition-colors duration-150 disabled:cursor-default",
+        "transition-colors disabled:cursor-default",
         !busy && "disabled:opacity-40",
         collapsed ? "h-10 justify-center" : "gap-2.5 px-3 py-2",
         active
@@ -413,6 +410,9 @@ function WalletSwitcher({
         ? UNKNOWN
         : formatAmount(wallet.cached.balance.total, unit);
   const [open, setOpen] = useState(false);
+  // The menu fades out like every anchored panel; while it leaves it is
+  // out of reach of the keyboard and of assistive technologies.
+  const menu = useExit(open, "fast");
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -473,7 +473,7 @@ function WalletSwitcher({
           aria-label="Add a wallet"
           className={clsx(
             "flex w-full cursor-pointer items-center rounded-md border border-dashed border-border",
-            "font-ui text-sm text-muted transition-colors duration-150 hover:bg-sunken/60 hover:text-text",
+            "font-ui text-sm text-muted transition-colors hover:bg-sunken/60 hover:text-text",
             collapsed ? "h-10 justify-center" : "gap-2 px-3 py-2.5",
           )}
         >
@@ -495,7 +495,7 @@ function WalletSwitcher({
       aria-label={active ? `Wallet: ${active.name}` : "Switch wallet"}
       className={clsx(
         "flex w-full cursor-pointer items-center rounded-md bg-sunken/70",
-        "transition-colors duration-150 hover:bg-sunken",
+        "transition-colors hover:bg-sunken",
         collapsed ? "h-10 justify-center" : "gap-2.5 px-3 py-2",
       )}
     >
@@ -539,13 +539,16 @@ function WalletSwitcher({
         switcher
       )}
 
-      {open && (
+      {menu.mounted && (
         <div
-          ref={menuRef}
+          ref={open ? menuRef : undefined}
           role="menu"
           aria-label="Wallets"
+          aria-hidden={menu.leaving || undefined}
+          inert={menu.leaving}
           className={clsx(
             "absolute z-40 flex max-h-[60vh] flex-col rounded-md bg-surface p-1.5 shadow-overlay",
+            menu.leaving ? "pointer-events-none animate-menu-out" : "animate-menu-in",
             collapsed ? "left-full top-0 ml-2 w-64" : "left-3 right-3 top-full mt-1.5",
           )}
         >
@@ -586,7 +589,7 @@ function WalletSwitcher({
                     }}
                     className={clsx(
                       "flex w-full cursor-pointer items-center gap-2.5 rounded-md py-2 pl-2.5 text-left",
-                      "transition-colors duration-150 group-hover:bg-sunken/70",
+                      "transition-colors group-hover:bg-sunken/70",
                       movable ? "pr-10" : "pr-2.5",
                       current ? "bg-sunken/50" : undefined,
                     )}
@@ -626,7 +629,7 @@ function WalletSwitcher({
                     {...drag.handleProps(index)}
                     className={clsx(
                       "absolute right-0 top-1/2 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-sm text-muted",
-                      "transition-opacity duration-150 group-hover:opacity-100",
+                      "transition-opacity group-hover:opacity-100",
                       dragging ? "cursor-grabbing opacity-100" : "cursor-grab opacity-0",
                     )}
                   >
@@ -647,7 +650,7 @@ function WalletSwitcher({
               setOpen(false);
               setAddWalletOpen(true);
             }}
-            className="flex w-full shrink-0 cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left font-ui text-sm text-muted transition-colors duration-150 hover:bg-sunken/70 hover:text-text"
+            className="flex w-full shrink-0 cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left font-ui text-sm text-muted transition-colors hover:bg-sunken/70 hover:text-text"
           >
             <Plus size={15} strokeWidth={1.5} aria-hidden className="shrink-0" />
             Add a wallet

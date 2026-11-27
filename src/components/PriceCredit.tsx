@@ -113,7 +113,7 @@ function Credits({ sources, className }: { sources: PriceSource[]; className?: s
           key={credit.url}
           type="button"
           onClick={() => void link.open(credit.url)}
-          className="cursor-pointer underline decoration-border underline-offset-2 transition-colors duration-150 hover:text-text"
+          className="cursor-pointer underline decoration-border underline-offset-2 transition-colors hover:text-text"
         >
           {credit.text}
         </button>

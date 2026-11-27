@@ -174,7 +174,7 @@ export function WalletIconPicker({
         <span
           className={clsx(
             "inline-flex size-8 items-center justify-center rounded-md bg-sunken",
-            "transition-colors duration-150 ease-out",
+            "transition-colors",
             open
               ? "text-primary ring-2 ring-inset ring-primary"
               : "text-text group-enabled/icon:group-hover/icon:text-primary",
@@ -240,7 +240,7 @@ function Section({
               onClick={() => onChoose(icon)}
               className={clsx(
                 "inline-flex size-10 cursor-pointer items-center justify-center rounded-md",
-                "transition-colors duration-150 ease-out active:scale-[0.96]",
+                "transition-[color,background-color,border-color,scale] active:scale-(--motion-press)",
                 current
                   ? "bg-sunken text-primary ring-2 ring-inset ring-primary"
                   : "text-muted hover:bg-sunken hover:text-text",

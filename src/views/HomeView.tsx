@@ -263,7 +263,7 @@ function WalletTitle({ meta }: { meta: WalletMeta }) {
             onClick={begin}
             aria-label={`Rename ${name}`}
             className={clsx(
-              "group inline-flex max-w-full cursor-pointer items-center gap-2 text-left transition-colors duration-150",
+              "group inline-flex max-w-full cursor-pointer items-center gap-2 text-left transition-colors",
               "hover:bg-sunken/60 focus-visible:bg-sunken/60",
               TITLE_BOX,
             )}
@@ -273,7 +273,7 @@ function WalletTitle({ meta }: { meta: WalletMeta }) {
               size={16}
               strokeWidth={1.5}
               aria-hidden
-              className="shrink-0 text-muted opacity-0 transition-opacity duration-150 group-hover:opacity-60 group-focus-visible:opacity-60"
+              className="shrink-0 text-muted opacity-0 transition-opacity group-hover:opacity-60 group-focus-visible:opacity-60"
             />
           </button>
         )}
@@ -416,7 +416,7 @@ function LinkRow({
     <button
       type="button"
       onClick={onClick}
-      className="group flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors duration-150 hover:bg-sunken/60"
+      className="group flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-sunken/60"
     >
       <span className="text-muted">{icon}</span>
       <span className="font-ui text-[13px] text-text">
@@ -433,7 +433,7 @@ function LinkRow({
         size={14}
         strokeWidth={1.5}
         aria-hidden
-        className="ml-auto text-muted opacity-60 transition-opacity duration-150 group-hover:opacity-100"
+        className="ml-auto text-muted opacity-60 transition-opacity group-hover:opacity-100"
       />
     </button>
   );
@@ -684,7 +684,7 @@ function StatusCard({
         <button
           type="button"
           onClick={() => openSettings("network")}
-          className="cursor-pointer rounded-md px-2 py-1 font-ui text-xs font-medium text-primary transition-colors duration-150 hover:bg-sunken"
+          className="cursor-pointer rounded-md px-2 py-1 font-ui text-xs font-medium text-primary transition-colors hover:bg-sunken"
         >
           Node settings →
         </button>
@@ -749,7 +749,7 @@ function ActivityCard({ snapshot, firstSync }: { snapshot: WalletSnapshot; first
           <button
             type="button"
             onClick={() => setView("transactions")}
-            className="cursor-pointer rounded-md px-2 py-1 font-ui text-xs font-medium text-primary transition-colors duration-150 hover:bg-sunken"
+            className="cursor-pointer rounded-md px-2 py-1 font-ui text-xs font-medium text-primary transition-colors hover:bg-sunken"
           >
             All transactions →
           </button>
@@ -781,7 +781,7 @@ function ActivityRow({ tx, onOpen }: { tx: TxSummary; onOpen: () => void }) {
       <button
         type="button"
         onClick={onOpen}
-        className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-1 py-1.5 text-left transition-colors duration-100 hover:bg-sunken/60"
+        className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-1 py-1.5 text-left transition-colors hover:bg-sunken/60"
       >
         <DirectionChip incoming={incoming} pending={pending} size="sm" />
         <span className="flex min-w-0 flex-1 flex-col">
@@ -801,7 +801,7 @@ function ActivityRow({ tx, onOpen }: { tx: TxSummary; onOpen: () => void }) {
           size={14}
           strokeWidth={1.5}
           aria-hidden
-          className="shrink-0 text-muted opacity-60 transition-opacity duration-150 group-hover:opacity-100"
+          className="shrink-0 text-muted opacity-60 transition-opacity group-hover:opacity-100"
         />
       </button>
     </li>

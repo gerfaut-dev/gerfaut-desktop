@@ -1,3 +1,4 @@
+import { SpinIcon } from "../components/SpinIcon";
 import {
   AlertTriangle,
   Ban,
@@ -1064,12 +1065,7 @@ function StatusCard({
             onClick={() => (watching ? void status.refetch() : setWatching(true))}
             aria-label="Check status"
           >
-            <RefreshCw
-              size={14}
-              strokeWidth={1.5}
-              aria-hidden
-              className={status.isFetching ? "motion-safe:animate-spin" : undefined}
-            />
+            <SpinIcon icon={RefreshCw} active={status.isFetching} size={14} />
             {watching ? "Refresh" : "Check"}
           </Button>
         </div>

@@ -199,7 +199,7 @@ export function ReceiveView({ walletId }: { walletId: string }) {
                   type="button"
                   onClick={() => setQrOpen(true)}
                   aria-label="Enlarge the address QR code"
-                  className="group relative shrink-0 cursor-zoom-in self-center rounded-lg border border-border bg-white p-2.5 transition-shadow duration-150 hover:shadow-[0_0_0_2px_var(--color-primary)] focus-visible:outline-none focus-visible:shadow-[0_0_0_2px_var(--color-primary)]"
+                  className="group relative shrink-0 cursor-zoom-in self-center rounded-lg border border-border bg-white p-2.5 transition-shadow hover:shadow-[0_0_0_2px_var(--color-primary)] focus-visible:outline-none focus-visible:shadow-[0_0_0_2px_var(--color-primary)]"
                 >
                   <div
                     aria-hidden
@@ -210,7 +210,7 @@ export function ReceiveView({ walletId }: { walletId: string }) {
                   />
                   <span
                     aria-hidden
-                    className="absolute bottom-1.5 right-1.5 inline-flex size-6 items-center justify-center rounded-md bg-white/90 text-[#0d1317] opacity-0 shadow-[0_1px_2px_rgba(13,19,23,0.25)] transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
+                    className="absolute bottom-1.5 right-1.5 inline-flex size-6 items-center justify-center rounded-md bg-white/90 text-[#0d1317] opacity-0 shadow-[0_1px_2px_rgba(13,19,23,0.25)] transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
                   >
                     <Maximize2 size={13} strokeWidth={1.75} />
                   </span>
@@ -437,7 +437,7 @@ function AddressCard({
                 <tr
                   key={row.index}
                   className={clsx(
-                    "transition-colors duration-100 hover:bg-sunken/60 [&>td]:border-b [&>td]:border-border",
+                    "transition-colors hover:bg-sunken/60 [&>td]:border-b [&>td]:border-border",
                     // The last row's rule parts it from the control under
                     // it; with none, the card's own edge is enough.
                     rows.length <= FOLDED_ROWS && "last:[&>td]:border-b-0",
@@ -466,7 +466,7 @@ function AddressCard({
               type="button"
               onClick={() => setExpanded(!expanded)}
               aria-expanded={expanded}
-              className="flex w-full cursor-pointer items-center justify-center gap-1.5 px-4 py-2.5 font-ui text-xs font-medium text-muted transition-colors duration-150 hover:bg-sunken/60 hover:text-text"
+              className="flex w-full cursor-pointer items-center justify-center gap-1.5 px-4 py-2.5 font-ui text-xs font-medium text-muted transition-colors hover:bg-sunken/60 hover:text-text"
             >
               {expanded ? (
                 <>

@@ -22,8 +22,8 @@ const buttonVariants = cva(
   [
     "inline-flex cursor-pointer items-center justify-center gap-2 rounded-md",
     "font-ui text-sm font-medium",
-    "transition-[background-color,color,box-shadow,scale] duration-150 ease-out",
-    "live:active:scale-[0.96]",
+    "transition-[background-color,color,box-shadow,scale]",
+    "live:active:scale-(--motion-press)",
     "disabled:cursor-default aria-busy:cursor-wait",
     "[&_svg]:pointer-events-none [&_svg]:shrink-0",
   ],

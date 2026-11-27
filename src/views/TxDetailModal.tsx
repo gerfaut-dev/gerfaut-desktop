@@ -475,7 +475,7 @@ function RawTransaction({ hex }: { hex: string }) {
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-1 py-1 font-ui text-xs font-medium uppercase tracking-[0.04em] text-muted transition-colors duration-150 hover:text-text"
+        className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-1 py-1 font-ui text-xs font-medium uppercase tracking-[0.04em] text-muted transition-colors hover:text-text"
       >
         {open ? (
           <ChevronDown size={14} strokeWidth={1.75} aria-hidden />

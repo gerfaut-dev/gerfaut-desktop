@@ -203,7 +203,7 @@ export function WalletsSection({
                           {...drag.handleProps(index)}
                           className={clsx(
                             "inline-flex size-10 shrink-0 items-center justify-center rounded-sm text-muted",
-                            "transition-colors duration-150 hover:text-text",
+                            "transition-colors hover:text-text",
                             dragging ? "cursor-grabbing" : "cursor-grab",
                           )}
                         >
@@ -281,7 +281,7 @@ export function WalletsSection({
                           <span
                             className={clsx(
                               "absolute right-full top-1/2 flex -translate-y-1/2 items-center gap-1 pr-1",
-                              "pointer-events-none opacity-0 transition-opacity duration-150 ease-out",
+                              "pointer-events-none opacity-0 transition-opacity",
                               "group-focus-within:pointer-events-auto group-focus-within:opacity-100",
                               "group-hover:pointer-events-auto group-hover:opacity-100",
                             )}
@@ -516,10 +516,10 @@ function MoveButton({
       onClick={blocked ? undefined : onClick}
       className={clsx(
         "inline-flex size-10 items-center justify-center rounded-md",
-        "transition-[color,background-color] duration-150 ease-out",
+        "transition-[color,background-color,scale]",
         blocked
           ? "cursor-default text-muted/40"
-          : "cursor-pointer text-muted hover:bg-sunken hover:text-text active:scale-[0.96]",
+          : "cursor-pointer text-muted hover:bg-sunken hover:text-text active:scale-(--motion-press)",
       )}
     >
       {children}

@@ -4,8 +4,9 @@ import { cn } from "@/lib/utils";
 
 /** The shadcn/ui dialog, on the Toundra roles: a Neige surface (Abysse
     in dark) with the overlay shadow, its one use, over a 40% dim. It
-    rises 8px as it fades in, the entry of a surface with no origin on
-    screen; nothing animates on the way out. */
+    rises as it fades in, the entry of a surface with no origin on
+    screen, and leaves by the same path; the dim fades with it. Radix
+    keeps both in the tree until their closing animation ends. */
 function Dialog({ ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />;
 }
@@ -25,7 +26,11 @@ function DialogOverlay({
   return (
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
-      className={cn("fixed inset-0 z-50 flex justify-center bg-black/40", className)}
+      className={cn(
+        "fixed inset-0 z-50 flex justify-center bg-black/40",
+        "data-[state=open]:animate-veil-in data-[state=closed]:animate-veil-out",
+        className,
+      )}
       {...props}
     />
   );
@@ -50,7 +55,7 @@ function DialogContent({
           data-slot="dialog-content"
           className={cn(
             "rounded-lg bg-surface shadow-overlay outline-none",
-            "motion-safe:animate-[modal-in_250ms_ease-out]",
+            "data-[state=open]:animate-surface-in data-[state=closed]:animate-surface-out",
             className,
           )}
           {...props}

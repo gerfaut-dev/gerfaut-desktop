@@ -311,14 +311,14 @@ function DescriptorSection({ snapshot, wallet }: { snapshot: PolicySnapshot; wal
       <summary
         className={clsx(
           LABEL,
-          "inline-flex cursor-pointer list-none items-center gap-1.5 rounded-md py-1 pr-1 transition-colors duration-150 hover:text-text [&::-webkit-details-marker]:hidden",
+          "inline-flex cursor-pointer list-none items-center gap-1.5 rounded-md py-1 pr-1 transition-colors hover:text-text [&::-webkit-details-marker]:hidden",
         )}
       >
         <ChevronRight
           size={14}
           strokeWidth={1.75}
           aria-hidden
-          className="transition-transform duration-150 group-open:rotate-90"
+          className="motion-safe:transition-transform group-open:rotate-90"
         />
         Descriptor
       </summary>

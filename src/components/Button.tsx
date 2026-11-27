@@ -1,3 +1,4 @@
+import { useSpin } from "../lib/motion";
 import { ChevronDown, ChevronUp, LoaderCircle } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ButtonHTMLAttributes, Ref } from "react";
@@ -49,6 +50,8 @@ export function Button({
   children,
   ...rest
 }: Props) {
+  // The spinner finishes the turn it started before the icon comes back.
+  const spin = useSpin(busy);
   return (
     <UiButton
       // First, so nothing passed here can undo the busy state below.
@@ -69,12 +72,13 @@ export function Button({
         className,
       )}
     >
-      {busy ? (
+      {spin.spinning ? (
         <LoaderCircle
           size={ICON_SIZE}
           strokeWidth={1.5}
           aria-hidden
           className="shrink-0 motion-safe:animate-spin"
+          onAnimationIteration={spin.onAnimationIteration}
         />
       ) : (
         Icon && <Icon size={ICON_SIZE} strokeWidth={1.5} aria-hidden className="shrink-0" />

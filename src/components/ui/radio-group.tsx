@@ -50,7 +50,7 @@ function RadioGroup({
     - `quiet`: a filter on a card (a chart's range); the chosen one
       raised on Neige, in the small label size. */
 const radioGroupItemVariants = cva(
-  "inline-flex items-center font-ui font-medium transition-colors duration-150 disabled:cursor-not-allowed",
+  "inline-flex items-center font-ui font-medium transition-colors disabled:cursor-not-allowed",
   {
     variants: {
       tone: {
