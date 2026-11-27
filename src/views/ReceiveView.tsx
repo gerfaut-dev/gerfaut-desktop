@@ -8,6 +8,7 @@ import {
   RotateCcw,
   SkipForward,
 } from "lucide-react";
+import { useSwap } from "../lib/motion";
 import { clsx } from "clsx";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -88,6 +89,7 @@ export function ReceiveView({ walletId }: { walletId: string }) {
   );
   const list = useAddressList(walletId);
   const { copy: copyText, copied } = useClipboard();
+  const copySwap = useSwap(copied);
   const [qrOpen, setQrOpen] = useState(false);
 
   const entries = addresses.data ?? [];
@@ -266,11 +268,13 @@ export function ReceiveView({ walletId }: { walletId: string }) {
                   <div className="flex flex-wrap items-center gap-2">
                     <Button variant="primary" onClick={() => void copy()}>
                       {copied ? (
-                        <Check size={16} strokeWidth={1.5} aria-hidden />
+                        <Check size={16} strokeWidth={1.5} aria-hidden className={copySwap} />
                       ) : (
-                        <Copy size={16} strokeWidth={1.5} aria-hidden />
+                        <Copy size={16} strokeWidth={1.5} aria-hidden className={copySwap} />
                       )}
-                      {copied ? "Copied" : "Copy address"}
+                      <span key={String(copied)} className={copySwap}>
+                        {copied ? "Copied" : "Copy address"}
+                      </span>
                     </Button>
                     {!singleAddress && (
                       <>

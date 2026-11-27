@@ -5,6 +5,7 @@ import { clsx } from "clsx";
 import { Button } from "../components/Button";
 import { Modal } from "../components/Modal";
 import { Lockup } from "../components/Lockup";
+import { useSwap } from "../lib/motion";
 
 interface Step {
   icon: ReactNode;
@@ -58,6 +59,7 @@ export function WelcomeTour({
 
   const last = step === STEPS.length - 1;
   const current = STEPS[step];
+  const turn = useSwap(step);
 
   return (
     <Modal open={open} onClose={onClose} title="Welcome" width={520} centered>
@@ -72,16 +74,21 @@ export function WelcomeTour({
             disc: every page keeps the same 64px slot, so the dialog
             does not jump. */}
         {step === 0 ? (
-          <Lockup label="Gerfaut" width={100} />
+          <span key={step} className={turn}>
+            <Lockup label="Gerfaut" width={100} />
+          </span>
         ) : (
-          <span className="flex size-16 items-center justify-center rounded-full bg-sunken text-primary">
+          <span
+            key={step}
+            className={`flex size-16 items-center justify-center rounded-full bg-sunken text-primary ${turn}`}
+          >
             {current.icon}
           </span>
         )}
         {/* As tall as the longest page's words: the dots and the
             buttons under them stay where they are from a page to the
             next, under a pointer that presses Next four times. */}
-        <div className="flex min-h-36 flex-col items-center gap-5">
+        <div key={step} className={`flex min-h-36 flex-col items-center gap-5 ${turn}`}>
           <h2 className="text-balance font-display text-2xl font-semibold text-text">
             {current.title}
           </h2>

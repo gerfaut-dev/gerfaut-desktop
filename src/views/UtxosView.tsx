@@ -1,4 +1,5 @@
 import { SyncIndicator } from "../components/SyncIndicator";
+import { useSwap } from "../lib/motion";
 import { LoadFailure } from "../components/LoadFailure";
 import { HeaderBalance, PageHeader } from "../components/PageHeader";
 import { useSnapshot, useUtxos } from "../state/queries";
@@ -12,13 +13,18 @@ export function UtxosView({ walletId }: { walletId: string }) {
   const snapshot = useSnapshot(walletId);
   const utxos = useUtxos(walletId, true);
   const sync = useWalletSync(walletId);
+  // Loading, failed or read: each state fades in where the last stood.
+  const arrive = useSwap(
+    snapshot.isPending ? "loading" : snapshot.isError || !snapshot.data ? "failed" : "read",
+  );
 
   if (snapshot.isPending) {
-    return <p className="py-4 font-ui text-sm text-muted">Loading wallet…</p>;
+    return <p className={`py-4 font-ui text-sm text-muted ${arrive}`}>Loading wallet…</p>;
   }
   if (snapshot.isError || !snapshot.data) {
     return (
       <LoadFailure
+        className={arrive}
         what="This wallet"
         error={snapshot.error}
         retrying={snapshot.isFetching}
@@ -30,7 +36,7 @@ export function UtxosView({ walletId }: { walletId: string }) {
   const firstSync = isFirstSync(sync, snapshot.data.meta);
 
   return (
-    <div className="flex h-full flex-col pb-2">
+    <div className={`flex h-full flex-col pb-2 ${arrive}`}>
       <PageHeader
         title="UTXOs"
         count={utxos.data?.length}

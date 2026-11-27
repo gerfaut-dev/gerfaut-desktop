@@ -43,12 +43,12 @@ export function useExit(open: boolean, exit: MotionDuration) {
     to a figure. The first render cuts, so a view opened on a state
     already known does not fade in. Key the block on the same state, so
     each change replays the fade. */
-export function useSwap(state: unknown): string | undefined {
+export function useSwap(state: unknown): string {
   const [first] = useState(state);
   const [moved, setMoved] = useState(false);
   const changed = !Object.is(state, first);
   if (changed && !moved) setMoved(true);
-  return moved || changed ? "animate-swap" : undefined;
+  return moved || changed ? "animate-swap" : "";
 }
 
 /** The loop of an action in progress: it keeps turning until the turn

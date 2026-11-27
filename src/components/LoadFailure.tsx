@@ -11,15 +11,18 @@ export function LoadFailure({
   error,
   onRetry,
   retrying = false,
+  className = "",
 }: {
   /** The sentence's subject: "This wallet", "The UTXOs". */
   what: string;
   error: unknown;
   onRetry: () => void;
   retrying?: boolean;
+  /** The fade of the page that shows it, when it follows a loading state. */
+  className?: string;
 }) {
   return (
-    <div role="alert" className="py-4">
+    <div role="alert" className={`py-4 ${className}`}>
       <p className="font-ui text-sm text-text">{what} could not be loaded.</p>
       {error !== null && error !== undefined && (
         <p className="mt-1 max-w-xl break-words font-ui text-xs text-muted">

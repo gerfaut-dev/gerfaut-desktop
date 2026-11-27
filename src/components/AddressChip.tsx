@@ -1,6 +1,7 @@
 import { clsx } from "clsx";
 import { Check, Copy } from "lucide-react";
 import { truncateMiddle } from "../lib/format";
+import { useSwap } from "../lib/motion";
 import { useClipboard } from "../state/clipboard";
 
 /** Inline identifier chip: mono, middle-truncated, click to copy with
@@ -34,6 +35,7 @@ export function AddressChip({
 }) {
   const clipboard = useClipboard();
   const copied = clipboard.copied;
+  const swap = useSwap(copied);
   const copy = () => void clipboard.copy(value);
   // Where the tail starts, for `fit`: counted from the length, so a
   // value no longer than its tail is the tail alone, whole.
@@ -62,9 +64,9 @@ export function AddressChip({
         truncateMiddle(value, head, tail)
       )}
       {copied ? (
-        <Check size={14} strokeWidth={1.5} aria-hidden className="shrink-0 text-confirmed" />
+        <Check size={14} strokeWidth={1.5} aria-hidden className={`shrink-0 text-confirmed ${swap}`} />
       ) : (
-        <Copy size={14} strokeWidth={1.5} aria-hidden className="shrink-0" />
+        <Copy size={14} strokeWidth={1.5} aria-hidden className={`shrink-0 ${swap}`} />
       )}
     </button>
   );

@@ -1,4 +1,5 @@
 import { clsx } from "clsx";
+import { useSwap } from "../lib/motion";
 import {
   Archive,
   ArrowLeftRight,
@@ -68,13 +69,18 @@ export function HomeView({ walletId }: { walletId: string }) {
   // The failure of this wallet's last sync, still said while it syncs
   // again.
   const failure = failureOf(sync);
+  // Loading, failed or read: each state fades in where the last stood.
+  const arrive = useSwap(
+    snapshot.isPending ? "loading" : snapshot.isError || !snapshot.data ? "failed" : "read",
+  );
 
   if (snapshot.isPending) {
-    return <p className="py-4 font-ui text-sm text-muted">Loading wallet…</p>;
+    return <p className={`py-4 font-ui text-sm text-muted ${arrive}`}>Loading wallet…</p>;
   }
   if (snapshot.isError || !snapshot.data) {
     return (
       <LoadFailure
+        className={arrive}
         what="This wallet"
         error={snapshot.error}
         retrying={snapshot.isFetching}
@@ -90,7 +96,7 @@ export function HomeView({ walletId }: { walletId: string }) {
   return (
     // The page measures itself, not the window: the two columns hold
     // down to the narrowest window with the sidebar open.
-    <div className="@container flex h-full min-h-[560px] flex-col pb-2">
+    <div className={`@container flex h-full min-h-[560px] flex-col pb-2 ${arrive}`}>
       {/* No freshness line here: Watch status carries it below. */}
       <PageHeader heading={<WalletTitle key={meta.id} meta={meta} />} />
 
@@ -351,10 +357,13 @@ function BalanceCard({
   // The policy in the grammar of the counts: "1 key", "2 of 3 keys",
   // "Recovery in 142 days". Until it is in, the row is only its name.
   const digest = policy.data ? policyDigest(policy.data) : { figure: "Policy", label: "" };
+  const arrive = useSwap(firstSync);
   return (
     <Card label="Total balance" className="flex-1">
       <div className="flex h-full flex-col">
-        {firstSync && !masked ? <BalanceUnknown /> : <Balance sats={balance.total} />}
+        <div key={String(firstSync)} className={arrive}>
+          {firstSync && !masked ? <BalanceUnknown /> : <Balance sats={balance.total} />}
+        </div>
         {note ? (
           <p className="mt-2 font-ui text-xs text-muted">{note}</p>
         ) : (
@@ -468,6 +477,7 @@ function PriceCard() {
   const points = answer?.points ?? [];
   const first = points[0];
   const last = points[points.length - 1];
+  const arrive = useSwap(last === undefined);
   // The price on screen is the source's: the screen credits it.
   useCreditFor(fiatEnabled && last ? answer?.source : null);
   const change = first && last ? ((last.rate - first.rate) / first.rate) * 100 : null;
@@ -502,7 +512,7 @@ function PriceCard() {
       }
     >
       {last ? (
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className={`flex flex-wrap items-center gap-2.5 ${arrive}`}>
           <span className="tabular text-[22px] font-semibold leading-tight text-text">
             {formatCurrency(last.rate, fiatCurrency, { maximumFractionDigits: 0 })}
           </span>
