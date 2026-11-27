@@ -73,7 +73,11 @@ export function useSpin(active: boolean) {
   };
 }
 
-const EASE = /--motion-ease:\s*([^;]+);/.exec(tokens)?.[1];
+const EASE = (() => {
+  const match = /--motion-ease:\s*([^;]+);/.exec(tokens);
+  if (!match) throw new Error("tokens.css has no --motion-ease");
+  return match[1];
+})();
 
 /** The fade on the spot for a block that must stay the same element
     (a live region is only read out reliably if it is not replaced):

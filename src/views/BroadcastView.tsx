@@ -260,7 +260,7 @@ export function BroadcastView({ network }: { network: Network }) {
             {/* A node that says no risks neither funds nor privacy —
                 but nothing else on the page says the send failed. */}
             {broadcastError && (
-              <Notice tone="info" role="alert">
+              <Notice tone="info" role="alert" className="animate-swap">
                 <span className="font-medium">The network refused this transaction.</span>
                 <span className="selectable mt-0.5 block break-words font-data text-xs text-muted">
                   {broadcastError}
@@ -1096,7 +1096,7 @@ function StatusCard({
       {/* Amber, as the link nothing opened below it: nothing on chain
           moves and no privacy is spent, the record simply stays. */}
       {forgetFailed && (
-        <Notice tone="info" role="alert" className="mt-2">
+        <Notice tone="info" role="alert" className="mt-2 animate-swap">
           Could not forget this broadcast. Try again.
         </Notice>
       )}

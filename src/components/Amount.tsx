@@ -1,4 +1,5 @@
 import { clsx } from "clsx";
+import { useState } from "react";
 import {
   MASKED,
   formatAmount,
@@ -42,12 +43,26 @@ export function useFiatValue(sats: number): string | null {
   return formatFiat(sats, quote.rate, fiatCurrency, network);
 }
 
+/** The fade of a fiat line that arrives with the price, after the page
+    waited for it. A value that changes keeps its line and is replaced
+    at once; turning the display on or showing balances again is the
+    reader's own gesture, not an arrival, and cuts. */
+function useFiatArrival(fiat: string | null): string {
+  const { fiatEnabled, masked } = useUi();
+  const [awaited, setAwaited] = useState(false);
+  const waiting = fiatEnabled && !masked && fiat === null;
+  if (waiting && !awaited) setAwaited(true);
+  if ((!fiatEnabled || masked) && awaited) setAwaited(false);
+  return awaited && fiat !== null ? "animate-swap" : "";
+}
+
 /** Headline balance figure: UI face with tabular figures, masked-aware.
     One line in the chosen unit — never both units — with the fiat value
     below when that display is on. Sized to read, not to shout. */
 export function Balance({ sats }: { sats: number }) {
   const { masked, unit } = useUi();
   const fiat = useFiatValue(sats);
+  const arrive = useFiatArrival(fiat);
   const primary = unit === "btc" ? formatBtc(sats) : formatSats(sats);
   return (
     <div className="selectable">
@@ -57,7 +72,7 @@ export function Balance({ sats }: { sats: number }) {
           <span className="ml-1.5 font-ui text-[13px] font-normal text-muted">BTC</span>
         )}
       </div>
-      {fiat && <div className="mt-1.5 tabular text-[13px] text-muted">{fiat}</div>}
+      {fiat && <div className={clsx("mt-1.5 tabular text-[13px] text-muted", arrive)}>{fiat}</div>}
     </div>
   );
 }
@@ -67,6 +82,7 @@ export function Balance({ sats }: { sats: number }) {
 export function ListAmount({ sats, pending }: { sats: number; pending?: boolean }) {
   const { masked, unit } = useUi();
   const fiat = useFiatValue(sats);
+  const arrive = useFiatArrival(fiat);
   return (
     <span className="inline-flex flex-col items-end">
       <span
@@ -77,7 +93,7 @@ export function ListAmount({ sats, pending }: { sats: number; pending?: boolean 
       >
         {masked ? MASKED : formatAmountSigned(sats, unit)}
       </span>
-      {fiat && <span className="tabular text-[11px] text-muted">{fiat}</span>}
+      {fiat && <span className={clsx("tabular text-[11px] text-muted", arrive)}>{fiat}</span>}
     </span>
   );
 }
@@ -102,13 +118,16 @@ export function UnitAmount({ sats }: { sats: number | null }) {
 export function StackedAmount({ sats }: { sats: number }) {
   const { masked, unit } = useUi();
   const fiat = useFiatValue(sats);
+  const arrive = useFiatArrival(fiat);
   return (
     <span className="inline-flex flex-col items-end">
       <span className="selectable whitespace-nowrap tabular text-[13px] font-medium text-text">
         {masked ? MASKED : formatAmount(sats, unit)}
       </span>
       {fiat && (
-        <span className="whitespace-nowrap tabular text-[11px] text-muted">{fiat}</span>
+        <span className={clsx("whitespace-nowrap tabular text-[11px] text-muted", arrive)}>
+          {fiat}
+        </span>
       )}
     </span>
   );

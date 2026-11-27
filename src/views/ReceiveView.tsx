@@ -171,6 +171,10 @@ export function ReceiveView({ walletId }: { walletId: string }) {
   const shownBefore = !oneAddress && visit.onScreen === onScreen && visit.shownBefore;
   const gapLimit = snapshot.data?.meta.gap_limit ?? 20;
   const gap = entry ? unusedBefore(entries, position) : 0;
+  // The address and the audit list each fade in where their loading
+  // line stood.
+  const arriveEntry = useSwap(entry ? "read" : addresses.isError ? "failed" : "loading");
+  const arriveList = useSwap(list.data ? "read" : list.isError ? "failed" : "loading");
 
   const copy = async () => {
     if (entry) await copyText(entry.address);
@@ -184,7 +188,7 @@ export function ReceiveView({ walletId }: { walletId: string }) {
         <p className="font-ui text-sm text-muted">Deriving address…</p>
       )}
       {addresses.isError && (
-        <p className="font-ui text-sm text-muted">
+        <p className={`font-ui text-sm text-muted ${arriveEntry}`}>
           The receive address could not be derived.
         </p>
       )}
@@ -192,7 +196,7 @@ export function ReceiveView({ walletId }: { walletId: string }) {
       <div className="flex flex-col gap-4">
         {entry && (
           <>
-            <div className="rounded-lg border border-border bg-surface p-6">
+            <div className={`rounded-lg border border-border bg-surface p-6 ${arriveEntry}`}>
               <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-stretch sm:gap-6">
                 {/* A QR code stays dark-on-light in every theme: scanners
                     expect it, and inverting hurts contrast for cameras.
@@ -359,17 +363,19 @@ export function ReceiveView({ walletId }: { walletId: string }) {
           <p className="font-ui text-sm text-muted">Loading addresses…</p>
         )}
         {list.isError && (
-          <p className="font-ui text-sm text-muted">The addresses could not be loaded.</p>
+          <p className={`font-ui text-sm text-muted ${arriveList}`}>The addresses could not be loaded.</p>
         )}
         {list.data && (
           <>
             <AddressCard
+              className={arriveList}
               title={singleAddress ? "Watched address" : "External"}
               hint={singleAddress ? undefined : "Receive addresses, in derivation order."}
               rows={list.data.external}
             />
             {!singleAddress && (
               <AddressCard
+                className={arriveList}
                 title="Change"
                 hint="Internal addresses used by outgoing transactions."
                 rows={list.data.internal}
@@ -396,11 +402,13 @@ function AddressCard({
   hint,
   rows,
   empty,
+  className,
 }: {
   title: string;
   hint?: string;
   rows: AddressRow[];
   empty?: string;
+  className?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const shown = expanded ? rows : rows.slice(0, FOLDED_ROWS);
@@ -408,7 +416,10 @@ function AddressCard({
   const used = rows.filter((row) => row.used).length;
 
   return (
-    <section aria-label={title} className="overflow-clip rounded-lg border border-border bg-surface">
+    <section
+      aria-label={title}
+      className={`overflow-clip rounded-lg border border-border bg-surface ${className ?? ""}`}
+    >
       <div className="flex items-baseline justify-between gap-3 px-3 pb-1 pt-3">
         <h2 className="flex items-baseline gap-2 font-ui text-sm font-semibold text-text">
           {title}

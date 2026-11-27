@@ -21,6 +21,7 @@ import {
 } from "../lib/policy";
 import { useSnapshot, useWalletPolicy } from "../state/queries";
 import { useClipboard } from "../state/clipboard";
+import { useSwap } from "../lib/motion";
 
 /** The `label` style: section names, roles, the estimated date. */
 const LABEL = "font-ui text-xs font-medium uppercase tracking-[0.04em] text-muted";
@@ -34,6 +35,9 @@ export function PolicyView({ walletId }: { walletId: string }) {
   const snapshot = useSnapshot(walletId);
   const policy = useWalletPolicy(walletId);
   const name = snapshot.data?.meta.name;
+  // Loading, failed or read: each state fades in where the last stood.
+  const state = policy.isPending ? "loading" : policy.isError || !policy.data ? "failed" : "read";
+  const arrive = useSwap(state);
 
   return (
     <div className="pb-6">
@@ -49,7 +53,7 @@ export function PolicyView({ walletId }: { walletId: string }) {
         }
       />
 
-      <div className="flex flex-col gap-6">
+      <div key={state} className={`flex flex-col gap-6 ${arrive}`}>
         {policy.isPending ? (
           <Placeholder />
         ) : policy.isError || !policy.data ? (
@@ -303,6 +307,7 @@ function DescriptorSection({ snapshot, wallet }: { snapshot: PolicySnapshot; wal
   // The descriptor is what lets anyone watch the wallet: it leaves the
   // clipboard history out, and the clipboard a minute later.
   const { copy: copyText, copied } = useClipboard({ sensitive: true });
+  const copySwap = useSwap(copied);
   const descriptor = shownDescriptor(snapshot, wallet);
   const copy = () => copyText(descriptor);
 
@@ -336,9 +341,9 @@ function DescriptorSection({ snapshot, wallet }: { snapshot: PolicySnapshot; wal
             onClick={() => void copy()}
           >
             {copied ? (
-              <Check size={14} strokeWidth={1.5} aria-hidden className="text-confirmed" />
+              <Check size={14} strokeWidth={1.5} aria-hidden className={`text-confirmed ${copySwap}`} />
             ) : (
-              <Copy size={14} strokeWidth={1.5} aria-hidden />
+              <Copy size={14} strokeWidth={1.5} aria-hidden className={copySwap} />
             )}
           </IconButton>
         </div>

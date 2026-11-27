@@ -22,7 +22,7 @@ export function InputError({
   className?: string;
 }) {
   return (
-    <div id={id} role="alert" className={cn("flex items-start gap-2", className)}>
+    <div id={id} role="alert" className={cn("flex items-start gap-2 animate-swap", className)}>
       <CircleAlert size={16} strokeWidth={1.5} aria-hidden className="mt-0.5 shrink-0 text-text" />
       <p className="min-w-0 font-ui text-sm font-medium text-text">
         {children}

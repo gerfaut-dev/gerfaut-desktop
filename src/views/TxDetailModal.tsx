@@ -34,6 +34,8 @@ import {
 import { explorerTxUrl } from "../lib/explorer";
 import { useTxDetail } from "../state/queries";
 import { useClipboard } from "../state/clipboard";
+import { useSwap } from "../lib/motion";
+import { FadeInPlace } from "../components/FadeInPlace";
 import { useUi } from "../state/store";
 import { AddressChip } from "../components/AddressChip";
 import { UnitAmount, useAmountText, useFiatValue } from "../components/Amount";
@@ -61,47 +63,52 @@ export function TxDetailModal({ walletId, network }: { walletId: string; network
 
   return (
     <Modal open={selectedTxid !== null} onClose={() => selectTx(null)} title="Transaction" width={960}>
-      {detail.isPending && <p className="font-ui text-sm text-muted">Loading…</p>}
-      {detail.isError && (
-        <p className="font-ui text-sm text-muted">This transaction could not be loaded.</p>
-      )}
-      {detail.data && (
-        <div className="flex flex-col gap-6">
-          <Summary detail={detail.data} onExplorer={explorerUrl === "" ? null : explorer.ask} />
-          <OpenFailure url={explorer.failed} className="" />
+      <FadeInPlace
+        key={selectedTxid ?? ""}
+        state={detail.data ? "read" : detail.isError ? "failed" : "loading"}
+      >
+        {detail.isPending && <p className="font-ui text-sm text-muted">Loading…</p>}
+        {detail.isError && (
+          <p className="font-ui text-sm text-muted">This transaction could not be loaded.</p>
+        )}
+        {detail.data && (
+          <div className="flex flex-col gap-6">
+            <Summary detail={detail.data} onExplorer={explorerUrl === "" ? null : explorer.ask} />
+            <OpenFailure url={explorer.failed} className="" />
 
-          <TxDiagram
-            inputs={inputBranches(detail.data)}
-            outputs={outputBranches(detail.data)}
-            feeSats={detail.data.summary.fee_sats}
-          />
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <IoList
-              title="Inputs"
-              ios={detail.data.inputs}
-              side="in"
-              extras={detail.data.extras}
-              coinbaseValue={coinbaseReward(detail.data)}
+            <TxDiagram
+              inputs={inputBranches(detail.data)}
+              outputs={outputBranches(detail.data)}
+              feeSats={detail.data.summary.fee_sats}
             />
-            <IoList
-              title="Outputs"
-              ios={detail.data.outputs}
-              side="out"
-              extras={detail.data.extras}
-              coinbaseValue={null}
-            />
-          </div>
 
-          <TechnicalFacts detail={detail.data} />
-
-          {detail.data.extras && detail.data.extras.raw_hex.length > 0 && (
-            <div className="border-t border-border/60 pt-4">
-              <RawTransaction hex={detail.data.extras.raw_hex} />
+            <div className="grid gap-4 lg:grid-cols-2">
+              <IoList
+                title="Inputs"
+                ios={detail.data.inputs}
+                side="in"
+                extras={detail.data.extras}
+                coinbaseValue={coinbaseReward(detail.data)}
+              />
+              <IoList
+                title="Outputs"
+                ios={detail.data.outputs}
+                side="out"
+                extras={detail.data.extras}
+                coinbaseValue={null}
+              />
             </div>
-          )}
-        </div>
-      )}
+
+            <TechnicalFacts detail={detail.data} />
+
+            {detail.data.extras && detail.data.extras.raw_hex.length > 0 && (
+              <div className="border-t border-border/60 pt-4">
+                <RawTransaction hex={detail.data.extras.raw_hex} />
+              </div>
+            )}
+          </div>
+        )}
+      </FadeInPlace>
 
       {explorer.warning}
     </Modal>
@@ -467,6 +474,7 @@ function Flags({ extras, outputs }: { extras: TxExtras; outputs: TxIo[] }) {
 function RawTransaction({ hex }: { hex: string }) {
   const [open, setOpen] = useState(false);
   const { copy: copyText, copied } = useClipboard();
+  const copySwap = useSwap(copied);
   const copy = () => copyText(hex);
 
   return (
@@ -495,9 +503,9 @@ function RawTransaction({ hex }: { hex: string }) {
             onClick={() => void copy()}
           >
             {copied ? (
-              <Check size={14} strokeWidth={1.5} aria-hidden className="text-confirmed" />
+              <Check size={14} strokeWidth={1.5} aria-hidden className={`text-confirmed ${copySwap}`} />
             ) : (
-              <Copy size={14} strokeWidth={1.5} aria-hidden />
+              <Copy size={14} strokeWidth={1.5} aria-hidden className={copySwap} />
             )}
           </IconButton>
         </div>
