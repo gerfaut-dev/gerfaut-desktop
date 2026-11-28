@@ -88,7 +88,7 @@ pub(crate) struct AppState {
     /// a locked app. Set here at startup from the lock the vault holds,
     /// raised again by [`lock_app`], and taken down by one thing only:
     /// a secret the core verified.
-    pub(crate) locked: AtomicBool,
+    locked: AtomicBool,
     /// The live watch and what it posts. It runs on this side, behind
     /// the lock included: see [`live`].
     pub(crate) live: live::LiveAlerts,
@@ -100,10 +100,25 @@ impl AppState {
     /// draws it, and the settings, redacted to what the lock screen is
     /// painted with.
     pub(crate) fn unlocked(&self) -> CommandResult<()> {
-        if self.locked.load(Ordering::SeqCst) {
+        if self.is_locked() {
             return Err(CommandError::new("locked", "Gerfaut is locked."));
         }
         Ok(())
+    }
+
+    /// Whether the lock screen stands in front of the vault now.
+    pub(crate) fn is_locked(&self) -> bool {
+        self.locked.load(Ordering::SeqCst)
+    }
+
+    /// Draws the curtain.
+    pub(crate) fn lock(&self) {
+        self.locked.store(true, Ordering::SeqCst);
+    }
+
+    /// Takes the curtain down: only for a secret the core verified.
+    pub(crate) fn unlock(&self) {
+        self.locked.store(false, Ordering::SeqCst);
     }
 }
 
@@ -599,7 +614,7 @@ async fn get_settings(state: tauri::State<'_, AppState>) -> CommandResult<Settin
 
 async fn settings_of(state: &AppState) -> Settings {
     let settings = state.manager.settings().await;
-    if state.locked.load(Ordering::SeqCst) {
+    if state.is_locked() {
         return locked_settings(settings);
     }
     settings
@@ -1028,7 +1043,7 @@ async fn verify_app_lock(
 async fn verify_lock(state: &AppState, secret: &str) -> CommandResult<LockVerdict> {
     let verdict = state.manager.verify_app_lock(secret).await?;
     if verdict.unlocked {
-        state.locked.store(false, Ordering::SeqCst);
+        state.unlock();
     }
     Ok(verdict)
 }
@@ -1045,7 +1060,7 @@ async fn lock_app(state: tauri::State<'_, AppState>) -> CommandResult<()> {
 
 async fn lock_vault(state: &AppState) -> CommandResult<()> {
     if state.manager.app_lock().await.is_some() {
-        state.locked.store(true, Ordering::SeqCst);
+        state.lock();
     }
     Ok(())
 }

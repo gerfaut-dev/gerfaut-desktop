@@ -313,7 +313,7 @@ async fn context(state: &AppState) -> Context {
         names,
         unit: preferences.unit,
         masked: preferences.masked,
-        details: !state.locked.load(Ordering::SeqCst),
+        details: !state.is_locked(),
     }
 }
 
@@ -463,7 +463,7 @@ async fn run(app: tauri::AppHandle, mut events: LiveEvents) {
         };
         // Behind the lock the window is told nothing of a wallet, not
         // even that one moved: it reads everything again at the unlock.
-        let locked = app.state::<AppState>().locked.load(Ordering::SeqCst);
+        let locked = app.state::<AppState>().is_locked();
         match signal {
             Signal::Status => {
                 let _ = app.emit(EVENT_STATUS, ());
@@ -957,7 +957,7 @@ mod tests {
             }]
         );
 
-        state.locked.store(true, Ordering::SeqCst);
+        state.lock();
         assert_eq!(
             posted(),
             vec![Notice {
@@ -969,7 +969,7 @@ mod tests {
             }]
         );
 
-        state.locked.store(false, Ordering::SeqCst);
+        state.unlock();
         runtime
             .block_on(state.manager.set_preferences(alerts(false)))
             .unwrap();
