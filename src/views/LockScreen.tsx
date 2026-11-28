@@ -1,5 +1,5 @@
 import { Eye, EyeOff } from "lucide-react";
-import clsx from "clsx";
+import { cn } from "@/lib/utils";
 import { useEffect, useRef, useState } from "react";
 import { Button, IconButton } from "../components/Button";
 import { Mark } from "../components/Mark";
@@ -34,6 +34,12 @@ export function LockScreen() {
   // than a hunt for the caret.
   useEffect(() => {
     if (wait === 0) field.current?.focus();
+  }, [wait]);
+
+  // A wait that runs out has said all it had to say about the refusal:
+  // the field it leaves behind is a fresh one.
+  useEffect(() => {
+    if (wait === 0) setRefused(false);
   }, [wait]);
 
   // The core will not even look at a secret while the delay runs.
@@ -109,7 +115,7 @@ export function LockScreen() {
                     setMessage(null);
                     setRefused(false);
                   }}
-                  className={clsx(
+                  className={cn(
                     "field-focus h-11 w-full rounded-sm border bg-sunken px-3 pr-11 font-ui text-sm text-text disabled:opacity-60",
                     // Refused, the edge stays Alerte under the focus too.
                     refused ? "border-alert focus-visible:border-alert" : "border-border",
@@ -132,8 +138,9 @@ export function LockScreen() {
                 )}
               </div>
 
-              {/* The line only ever speaks of a secret that did not open
-                  the app, in Alerte. It holds its height whether it
+              {/* A refused secret, and the wait it brings, is said in
+                  Alerte; anything else the core answers keeps the muted
+                  voice. The line holds its height whether it
                   speaks or not, so nothing under it moves, and what it
                   says fades in where it stands, without a shake. It is
                   a live region, and stays one: only its words are
@@ -141,7 +148,10 @@ export function LockScreen() {
                   reader would read the whole sentence again every one. */}
               <p
                 role="status"
-                className="mt-2 min-h-5 w-full text-center font-ui text-sm text-alert"
+                className={cn(
+                  "mt-2 min-h-5 w-full text-center font-ui text-sm",
+                  refused ? "text-alert" : "text-muted",
+                )}
               >
                 {wait > 0 ? (
                   <span key="wait" className="animate-swap">
