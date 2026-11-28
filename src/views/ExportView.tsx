@@ -188,8 +188,9 @@ export function ExportView({ walletId }: { walletId: string }) {
             onClick={run}
             disabled={selected === 0 || problem !== null}
             busy={exportCsv.isPending}
+            busyLabel="Exporting…"
           >
-            {exportCsv.isPending ? "Exporting…" : "Export CSV…"}
+            Export CSV…
           </Button>
         </div>
         {/* Under the button that sent it, until the next try: a toast

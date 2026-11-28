@@ -276,9 +276,10 @@ export function BroadcastView({ network }: { network: Network }) {
                 icon={Radio}
                 disabled={!sendable(read)}
                 busy={flow.phase === "sending"}
+                busyLabel="Broadcasting…"
                 onClick={() => setConfirmOpen(true)}
               >
-                {flow.phase === "sending" ? "Broadcasting…" : "Broadcast"}
+                Broadcast
               </Button>
             </div>
           </>
@@ -445,9 +446,10 @@ function InputCard({
           variant="primary"
           disabled={raw.trim().length === 0}
           busy={busy}
+          busyLabel="Reading…"
           onClick={onDecode}
         >
-          {busy ? "Reading…" : "Preview"}
+          Preview
         </Button>
       </div>
       {/* Said before the picker opens, in sight: a tooltip would wait

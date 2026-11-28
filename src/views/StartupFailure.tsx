@@ -66,9 +66,10 @@ export function StartupFailure({ failure }: { failure: CommandError }) {
           className="mt-6"
           icon={RotateCcw}
           busy={trying}
+          busyLabel="Trying…"
           onClick={() => void retry()}
         >
-          {trying ? "Trying…" : "Try again"}
+          Try again
         </Button>
       </div>
     </div>

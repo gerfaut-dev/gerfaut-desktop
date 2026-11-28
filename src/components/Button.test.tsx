@@ -36,13 +36,76 @@ describe("Button", () => {
     expect(button).toHaveAttribute("aria-disabled", "true");
     expect(button).not.toBeDisabled();
     expect(button).not.toHaveClass("opacity-50");
-    // The spinner in the icon's slot, not beside it.
-    expect(button.querySelectorAll("svg")).toHaveLength(1);
+    // The spinner in the icon's slot, not beside it: the icon, faded
+    // out, shares its cell.
+    const [icon, spinner] = button.querySelectorAll("svg");
+    expect(button.querySelectorAll("svg")).toHaveLength(2);
+    expect(icon).toHaveClass("opacity-0", "col-start-1", "row-start-1");
+    expect(spinner).not.toHaveClass("opacity-0");
+    expect(spinner).toHaveClass("col-start-1", "row-start-1");
     button.focus();
     await userEvent.click(button);
     await userEvent.keyboard("{Enter}");
     expect(onClick).not.toHaveBeenCalled();
     expect(button).toHaveFocus();
+  });
+
+  it("fades its busy words in over its label, both laid out, one read", () => {
+    const { rerender } = render(
+      <Button variant="primary" busy={false} busyLabel="Adding…">
+        Add wallet
+      </Button>,
+    );
+    const button = screen.getByRole("button", { name: "Add wallet" });
+    const label = screen.getByText("Add wallet");
+    const busyWords = screen.getByText("Adding…");
+    // Both hold their room in one cell, so the button is as wide as the
+    // longer one in either state; the one not shown is transparent and
+    // silent.
+    expect(button).toContainElement(busyWords);
+    expect(busyWords.parentElement).toBe(label.parentElement);
+    expect(busyWords).toHaveClass("row-start-1", "col-start-1", "opacity-0", "transition-opacity");
+    expect(busyWords).toHaveAttribute("aria-hidden", "true");
+    expect(label).toHaveClass("row-start-1", "col-start-1", "transition-opacity");
+    expect(label).not.toHaveClass("opacity-0");
+
+    rerender(
+      <Button variant="primary" busy busyLabel="Adding…">
+        Add wallet
+      </Button>,
+    );
+    expect(button).toHaveAccessibleName("Adding…");
+    expect(screen.getByText("Add wallet")).toBe(label);
+    expect(label).toHaveClass("opacity-0");
+    expect(label).toHaveAttribute("aria-hidden", "true");
+    expect(busyWords).not.toHaveClass("opacity-0");
+    expect(busyWords).not.toHaveAttribute("aria-hidden");
+    // A fade, not a motion: reduced motion keeps it, so nothing here is
+    // written `motion-safe:`.
+    expect(busyWords.className).not.toMatch(/motion-safe/);
+  });
+
+  it("lays out a glyph passed among its words the way it lays out its own", () => {
+    render(
+      <Button variant="secondary">
+        <Bell aria-hidden />
+        <span>Copy address</span>
+      </Button>,
+    );
+    const words = screen.getByText("Copy address");
+    expect(words.parentElement).toHaveClass("inline-flex", "items-center", "gap-2");
+  });
+
+  it("keeps a label with no busy words of its own still while the glyph swaps", () => {
+    render(
+      <Button variant="secondary" icon={Bell} busy>
+        New address
+      </Button>,
+    );
+    const label = screen.getByText("New address");
+    expect(label).not.toHaveClass("opacity-0");
+    expect(label).not.toHaveAttribute("aria-hidden");
+    expect(screen.getByRole("button", { name: "New address" })).toBeInTheDocument();
   });
 
   it("switches a busy submit off, so Enter in its form cannot send it again", async () => {

@@ -338,8 +338,13 @@ export function BackupExportModal({
             <Button variant="secondary" onClick={close}>
               Cancel
             </Button>
-            <Button variant="primary" busy={exportBackup.isPending} onClick={() => void create()}>
-              {exportBackup.isPending ? "Creating…" : "Create backup"}
+            <Button
+              variant="primary"
+              busy={exportBackup.isPending}
+              busyLabel="Creating…"
+              onClick={() => void create()}
+            >
+              Create backup
             </Button>
           </div>
         </div>
@@ -594,9 +599,10 @@ export function BackupRestoreModal({
               variant="primary"
               disabled={source === null}
               busy={previewBackup.isPending}
+              busyLabel="Opening…"
               onClick={() => void openBackup()}
             >
-              {previewBackup.isPending ? "Opening…" : "Open backup"}
+              Open backup
             </Button>
           </div>
           <ScanQrModal
@@ -704,6 +710,7 @@ export function BackupRestoreModal({
               variant="primary"
               disabled={chosen.size === 0}
               busy={importBackup.isPending}
+              busyLabel="Restoring…"
               onClick={() => void restore()}
             >
               {chosen.size === 1 ? "Restore 1 wallet" : `Restore ${chosen.size} wallets`}

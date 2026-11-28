@@ -235,8 +235,15 @@ function PriceTroubleNote({
         // Below the sentence, at the right, as the mobile's note puts
         // its actions: the sentence keeps the whole width.
         <div className="mt-2 flex justify-end">
-          <Button variant="secondary" size="sm" onTint busy={isPending} onClick={retry}>
-            {isPending ? "Trying…" : "Try again"}
+          <Button
+            variant="secondary"
+            size="sm"
+            onTint
+            busy={isPending}
+            busyLabel="Trying…"
+            onClick={retry}
+          >
+            Try again
           </Button>
         </div>
       )}

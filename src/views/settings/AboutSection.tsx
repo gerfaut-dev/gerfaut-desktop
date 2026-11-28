@@ -103,6 +103,7 @@ export function AboutSection() {
               variant={available ? "secondary" : "primary"}
               icon={RefreshCw}
               busy={check.isPending}
+              busyLabel="Checking…"
               onClick={() =>
                 check.mutate(undefined, {
                   onSuccess: (status) => {
@@ -120,7 +121,7 @@ export function AboutSection() {
                 })
               }
             >
-              {check.isPending ? "Checking…" : "Check for updates"}
+              Check for updates
             </Button>
           </span>
         </div>

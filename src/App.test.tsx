@@ -4438,6 +4438,36 @@ describe("the app lock", () => {
     expect(screen.getByText("Locked")).toBeInTheDocument();
   });
 
+  it("marks a refused PIN in Alerte until the next keystroke", async () => {
+    mockLocked([{ unlocked: false, failures: 1, retry_after_secs: 0 }]);
+    renderApp();
+    const user = userEvent.setup();
+    const field = await screen.findByLabelText("PIN");
+    expect(field).not.toHaveAttribute("aria-invalid");
+    expect(field).toHaveClass("border-border");
+
+    await user.type(field, "9999");
+    await user.click(screen.getByRole("button", { name: /unlock/i }));
+
+    // Read out by the live line, which says it in Alerte, fading in on the spot.
+    const status = screen.getByRole("status");
+    await waitFor(() => expect(status).toHaveTextContent("Wrong PIN"));
+    expect(status).toHaveClass("text-alert");
+    expect(within(status).getByText("Wrong PIN")).toHaveClass("animate-swap");
+    // The field takes an Alerte edge, focused as it is.
+    expect(field).toHaveFocus();
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    expect(field).toHaveClass("border-alert", "focus-visible:border-alert");
+    expect(field).not.toHaveClass("border-border");
+
+    // The next keystroke clears both.
+    await user.keyboard("1");
+    expect(field).not.toHaveAttribute("aria-invalid");
+    expect(field).toHaveClass("border-border");
+    expect(field).not.toHaveClass("border-alert");
+    expect(status.textContent).toBe("");
+  });
+
   it("counts down the wait the core imposes, and refuses to try meanwhile", async () => {
     mockLocked([{ unlocked: false, failures: 3, retry_after_secs: 5 }]);
     renderApp();

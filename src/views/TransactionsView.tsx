@@ -61,9 +61,10 @@ export function TransactionsView({ walletId }: { walletId: string }) {
               variant="secondary"
               icon={ChevronDown}
               busy={loadMore.isPending}
+              busyLabel="Fetching…"
               onClick={() => loadMore.mutate(walletId)}
             >
-              {loadMore.isPending ? "Fetching…" : "Load older transactions"}
+              Load older transactions
             </Button>
             <p className="font-ui text-xs text-muted">
               The balance above already covers the full history.

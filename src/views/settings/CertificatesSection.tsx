@@ -156,13 +156,10 @@ export function CertificateDialog({
               <Button
                 variant={confirming ? "danger" : "secondary"}
                 busy={busy}
+                busyLabel="Saving…"
                 onClick={() => (confirming ? onAccept(fingerprint) : setConfirming(true))}
               >
-                {busy
-                  ? "Saving…"
-                  : confirming
-                    ? "Yes, trust the new certificate"
-                    : "Trust the new certificate"}
+                {confirming ? "Yes, trust the new certificate" : "Trust the new certificate"}
               </Button>
               {/* The focus starts on the safe way out: this question can
                   open over a page where the user is typing, and two
@@ -176,8 +173,13 @@ export function CertificateDialog({
               <Button variant="secondary" disabled={busy} onClick={onCancel}>
                 Cancel
               </Button>
-              <Button variant="primary" busy={busy} onClick={() => onAccept(fingerprint)}>
-                {busy ? "Saving…" : "Accept and save"}
+              <Button
+                variant="primary"
+                busy={busy}
+                busyLabel="Saving…"
+                onClick={() => onAccept(fingerprint)}
+              >
+                Accept and save
               </Button>
             </>
           )}
@@ -254,6 +256,7 @@ export function CertificatesSection({ certs }: { certs: Record<string, string> }
             <Button
               variant="danger"
               busy={forget.isPending}
+              busyLabel="Forgetting…"
               onClick={() => {
                 setFailure(null);
                 void forget.mutateAsync(pending).then(() => {
