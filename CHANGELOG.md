@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - Smoother, consistent animations across the app. Dialogs, menus, tooltips and the confirmation toast now fade out as they close, the dim behind a dialog fades with it, and a page that finishes loading fades in without shifting. A spinning icon finishes its turn before it stops. Switching themes changes every colour at once. With "Reduce motion" turned on in your system, nothing slides or turns any more, but fades remain.
+- A wrong PIN or password on the lock screen is now written in red, fading in under a field with a red edge, until you type again. A button that changes its words while it works, such as "Add wallet" to "Adding…", fades from one to the other and keeps its width. A wallet you drag in Settings › Wallets lifts on a shadow instead of turning see-through.
 - In Settings › Wallets, a wallet's icon is changed by clicking the icon itself, left of its name. The Icon button on the right is gone.
 - The update check asks gerfaut-wallet.com for the latest version instead of the GitHub API, and "Get" opens the download page of gerfaut-wallet.com. When the check fails, Settings › About says "Could not check for updates." Version 0.1.0 still asks the old GitHub address, which no longer answers, so it never learns that a new version is out. Install this one by hand from gerfaut-wallet.com/download, once, and Gerfaut tells you about the next ones.
 - Gerfaut's source code now lives at github.com/gerfaut-dev, and "Report a problem" opens its issues there.
