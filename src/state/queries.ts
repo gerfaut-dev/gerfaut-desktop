@@ -23,7 +23,7 @@ import type {
   WalletIconId,
   WalletMeta,
 } from "../lib/ipc";
-import { errorMessage, failureMessage, ipc, isCommandError, isFalseProof } from "../lib/ipc";
+import { errorMessage, failureMessage, ipc, isCommandError, isFalseProof, isKind } from "../lib/ipc";
 import { syncTicket } from "../lib/syncState";
 import type { SyncOutcomes } from "../lib/syncState";
 import { useUi } from "./store";
@@ -367,7 +367,7 @@ export function useExportCsv() {
 /** Whether a price was not asked because Tor is required and cannot
     be had: with an onion backend the core sends nothing in the clear. */
 export function torDown(error: unknown): boolean {
-  return isCommandError(error) && error.kind === "tor";
+  return isKind(error, "tor");
 }
 
 /** Asked whatever the webview thinks of the network. The request is a

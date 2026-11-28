@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Button } from "../../components/Button";
 import { Modal } from "../../components/Modal";
 import type { AppLock, LockKind } from "../../lib/ipc";
-import { isCommandError } from "../../lib/ipc";
+import { plainMessage } from "../../lib/ipc";
 import { LOCK_DELAYS, useLockDelay, useSetLockDelay } from "../../state/autoLock";
 import type { LockDelay } from "../../state/autoLock";
 import { useLock } from "../../state/lock";
@@ -110,7 +110,7 @@ export function SecuritySection({ lock }: { lock: AppLock | null }) {
       showToast(dialog === "change" ? "Setting saved" : "App lock on");
       close();
     } catch (error) {
-      setProblem(isCommandError(error) ? error.message : String(error));
+      setProblem(plainMessage(error));
     }
   };
 
@@ -120,7 +120,7 @@ export function SecuritySection({ lock }: { lock: AppLock | null }) {
       showToast("App lock off");
       close();
     } catch (error) {
-      setProblem(isCommandError(error) ? error.message : String(error));
+      setProblem(plainMessage(error));
     }
   };
 

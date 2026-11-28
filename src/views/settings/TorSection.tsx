@@ -5,7 +5,7 @@ import { Button } from "../../components/Button";
 import { Notice } from "../../components/Notice";
 import { OnionIcon } from "../../components/icons/OnionIcon";
 import type { TorMode, TorRoute, TorSettings, TorStatus } from "../../lib/ipc";
-import { ipc, isCommandError } from "../../lib/ipc";
+import { ipc, plainMessage } from "../../lib/ipc";
 import { keys } from "../../state/queries";
 import { FieldLabel, SectionCard, Segmented } from "./primitives";
 
@@ -89,7 +89,7 @@ export function TorSection({ tor }: { tor: TorSettings }) {
     },
     onError: (error) => {
       setRoute(null);
-      setProblem(isCommandError(error) ? error.message : String(error));
+      setProblem(plainMessage(error));
     },
   });
 
@@ -121,7 +121,7 @@ export function TorSection({ tor }: { tor: TorSettings }) {
       {
         onError: (error) => {
           setMode(tor.mode);
-          setProblem(isCommandError(error) ? error.message : String(error));
+          setProblem(plainMessage(error));
         },
       },
     );

@@ -50,8 +50,8 @@ import {
   FALSE_PROOF,
   PRIVATE_KEY_NOT_A_TRANSACTION,
   errorMessage,
-  isCommandError,
   isFalseProof,
+  isKind,
 } from "../lib/ipc";
 import { openFilePicker } from "../lib/excursion";
 import { TRANSACTION_FILE_ACCEPT, TRANSACTION_FILE_HINT } from "../lib/importFiles";
@@ -221,10 +221,9 @@ export function BroadcastView({ network }: { network: Network }) {
     ? null
     : refusal.kind === "file"
       ? { headline: refusal.message }
-      : isCommandError(refusal.error) &&
-          (refusal.error.kind === "invalid_input" || refusal.error.kind === "too_many_parts")
+      : isKind(refusal.error, "invalid_input") || isKind(refusal.error, "too_many_parts")
         ? { headline: UNREADABLE_TRANSACTION, detail: refusal.error.message }
-        : isCommandError(refusal.error) && refusal.error.kind === "private_material"
+        : isKind(refusal.error, "private_material")
           ? { headline: PRIVATE_KEY_NOT_A_TRANSACTION }
           : { headline: errorMessage(refusal.error) };
   const broadcastError =

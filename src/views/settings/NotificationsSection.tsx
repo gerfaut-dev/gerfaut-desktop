@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 import { Button } from "../../components/Button";
 import { Notice } from "../../components/Notice";
-import { ipc, isCommandError } from "../../lib/ipc";
+import { ipc, plainMessage } from "../../lib/ipc";
 import type { LeftOut, Settings, WatchState, WatchStatus } from "../../lib/ipc";
 import {
   LIVE_NO_WALLET_LINE,
@@ -86,7 +86,7 @@ export function NotificationsSection({
       await ipc.sendTestNotification();
       setTest({ ok: true });
     } catch (error) {
-      setTest({ ok: false, message: isCommandError(error) ? error.message : String(error) });
+      setTest({ ok: false, message: plainMessage(error) });
     } finally {
       setTesting(false);
     }

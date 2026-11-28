@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import { useEffect, useRef, useState } from "react";
 import { Button, IconButton } from "../components/Button";
 import { Mark } from "../components/Mark";
-import { isCommandError } from "../lib/ipc";
+import { plainMessage } from "../lib/ipc";
 import { useLock } from "../state/lock";
 
 /** The screen that stands in front of everything while the app is
@@ -65,7 +65,7 @@ export function LockScreen() {
         setMessage(pin ? "Wrong PIN" : "Wrong password");
       }
     } catch (error) {
-      setMessage(isCommandError(error) ? error.message : String(error));
+      setMessage(plainMessage(error));
     } finally {
       setChecking(false);
       // Submitting took the focus to the button; a refused secret is

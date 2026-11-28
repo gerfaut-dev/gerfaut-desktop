@@ -10,7 +10,7 @@ import { ScanQrModal } from "../../components/ScanQrModal";
 import { Select } from "../../components/Select";
 import { OnionIcon } from "../../components/icons/OnionIcon";
 import { NETWORK_LABEL, groupThousands } from "../../lib/format";
-import { PRIVATE_KEY_NOT_A_SERVER, ipc, isCommandError, materialRefusal } from "../../lib/ipc";
+import { PRIVATE_KEY_NOT_A_SERVER, ipc, isKind, materialRefusal } from "../../lib/ipc";
 import type { BackendCheck, BackendConfig, Network, PublicServer, Settings } from "../../lib/ipc";
 import {
   cancelBackendTest,
@@ -367,7 +367,7 @@ export function BackendSection({
         try {
           await ipc.parseBackend(config.url);
         } catch (error) {
-          const secret = isCommandError(error) && error.kind === "private_material";
+          const secret = isKind(error, "private_material");
           refuse(
             config,
             portInHost && !secret
