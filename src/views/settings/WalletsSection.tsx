@@ -175,7 +175,11 @@ export function WalletsSection({
                     // The grip's glyph then starts where a row without one starts.
                     "group rounded-md border border-border bg-surface py-3 pr-4",
                     movable ? "pl-1" : "pl-4",
-                    dragging && "relative z-10 opacity-80",
+                    // Lifted, it is the one thing that floats: its own surface
+                    // and the overlay shadow, taken and given back at the
+                    // state pace.
+                    "transition-shadow duration-base",
+                    dragging && "relative z-10 shadow-overlay",
                   )}
                 >
                   {/* The name takes the room there is, and the actions go

@@ -1690,6 +1690,27 @@ describe("settings sections", () => {
     expect(pin).toHaveAttribute("aria-checked", "false");
   });
 
+  it("lifts a dragged wallet on the overlay shadow and sets it down without it", async () => {
+    const second: WalletMeta = { ...WALLET, id: "w-2", name: "Lightning float", icon: "key" };
+    mockSettingsIpc({ list_wallets: () => [WALLET, second] });
+    act(() => useUi.getState().openSettings("wallets"));
+    renderSettings([WALLET, second]);
+    const row = (await screen.findByText("Cold storage")).closest("li")!;
+    const grip = within(row).getByTitle("Drag to reorder");
+    // At rest it lies flat, and only its shadow is ever set to move.
+    expect(row).toHaveClass("transition-shadow");
+    expect(row).not.toHaveClass("shadow-overlay");
+
+    fireEvent.pointerDown(grip, { button: 0, clientY: 20 });
+    fireEvent.pointerMove(grip, { clientY: 30 });
+    // Its own surface and the shadow, nothing faded.
+    expect(row).toHaveClass("shadow-overlay", "bg-surface");
+    expect(row.className).not.toMatch(/opacity/);
+
+    fireEvent.pointerUp(grip);
+    expect(row).not.toHaveClass("shadow-overlay");
+  });
+
   it("offers no reordering to a single wallet", () => {
     mockSettingsIpc();
     act(() => useUi.getState().openSettings("wallets"));
