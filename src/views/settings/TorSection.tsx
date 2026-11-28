@@ -197,8 +197,13 @@ export function TorSection({ tor }: { tor: TorSettings }) {
           )}
 
           <div>
-            <Button variant="primary" busy={connect.isPending} onClick={() => connect.mutate()}>
-              {connect.isPending ? "Connecting…" : "Test the connection"}
+            <Button
+              variant="primary"
+              busy={connect.isPending}
+              busyLabel="Connecting…"
+              onClick={() => connect.mutate()}
+            >
+              Test the connection
             </Button>
           </div>
         </div>

@@ -624,8 +624,9 @@ export function BackendSection({
             onClick={() => void save()}
             disabled={!valid}
             busy={saving !== null || testing}
+            busyLabel={saving?.checking ? "Checking the certificate…" : undefined}
           >
-            {saving?.checking ? "Checking the certificate…" : "Save backend"}
+            Save backend
           </Button>
           {saveError && (
             <p role="alert" className="mt-2 font-ui text-sm text-muted">

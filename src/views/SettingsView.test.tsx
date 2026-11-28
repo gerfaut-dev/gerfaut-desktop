@@ -1530,10 +1530,10 @@ describe("settings sections", () => {
     expect(confirm).toHaveClass("bg-alert");
     const notice = within(row).getByText(/cannot be undone/).closest<HTMLElement>(".bg-pending-surface");
     expect(notice).not.toBeNull();
-    expect(within(notice!).getAllByRole("button").map((button) => button.textContent)).toEqual([
-      "Cancel",
-      "Remove wallet",
-    ]);
+    const [cancel, yes, ...others] = within(notice!).getAllByRole("button");
+    expect(others).toEqual([]);
+    expect(cancel).toHaveAccessibleName("Cancel");
+    expect(yes).toBe(confirm);
 
     await user.click(within(row).getByRole("button", { name: "Cancel" }));
     expect(within(row).queryByRole("button", { name: "Remove wallet" })).not.toBeInTheDocument();

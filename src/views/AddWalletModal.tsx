@@ -554,9 +554,10 @@ export function AddWalletModal({ activeNetwork }: { activeNetwork: Network }) {
               variant="primary"
               disabled={name.trim().length === 0 || parsing}
               busy={addWallet.isPending}
+              busyLabel="Adding…"
               onClick={() => void submit()}
             >
-              {addWallet.isPending ? "Adding…" : "Add wallet"}
+              Add wallet
             </Button>
           </div>
         </div>

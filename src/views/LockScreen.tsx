@@ -146,8 +146,9 @@ export function LockScreen() {
                 className="mt-2 w-full"
                 disabled={wait > 0 || secret.length === 0}
                 busy={checking}
+                busyLabel="Unlocking…"
               >
-                {checking ? "Unlocking…" : "Unlock"}
+                Unlock
               </Button>
             </form>
           </div>
