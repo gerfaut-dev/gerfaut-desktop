@@ -1,4 +1,5 @@
 import { Eye, EyeOff } from "lucide-react";
+import clsx from "clsx";
 import { useEffect, useRef, useState } from "react";
 import { Button, IconButton } from "../components/Button";
 import { Mark } from "../components/Mark";
@@ -20,6 +21,9 @@ export function LockScreen() {
   const [hidden, setHidden] = useState(true);
   const [checking, setChecking] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  // The secret just typed was refused: the field keeps an Alerte edge
+  // until the next keystroke.
+  const [refused, setRefused] = useState(false);
   const [wait, setWait] = useState(0);
   const field = useRef<HTMLInputElement>(null);
 
@@ -48,6 +52,7 @@ export function LockScreen() {
       const verdict = await unlock(secret);
       if (verdict.unlocked) return;
       setSecret("");
+      setRefused(true);
       if (verdict.retry_after_secs > 0) {
         setWait(verdict.retry_after_secs);
       } else {
@@ -97,12 +102,18 @@ export function LockScreen() {
                   maxLength={pin ? 12 : undefined}
                   autoComplete="off"
                   spellCheck={false}
+                  aria-invalid={refused || undefined}
                   onChange={(event) => {
                     const next = event.target.value;
                     setSecret(pin ? next.replace(/\D/g, "") : next);
                     setMessage(null);
+                    setRefused(false);
                   }}
-                  className="field-focus h-11 w-full rounded-sm border border-border bg-sunken px-3 pr-11 font-ui text-sm text-text disabled:opacity-60"
+                  className={clsx(
+                    "field-focus h-11 w-full rounded-sm border bg-sunken px-3 pr-11 font-ui text-sm text-text disabled:opacity-60",
+                    // Refused, the edge stays Alerte under the focus too.
+                    refused ? "border-alert focus-visible:border-alert" : "border-border",
+                  )}
                 />
                 {!pin && (
                   <span className="absolute right-1 top-1/2 -translate-y-1/2">
@@ -121,22 +132,28 @@ export function LockScreen() {
                 )}
               </div>
 
-              {/* A refused secret is a fact, not an alarm: Alerte is kept
-                  for coins moving. The line holds its height whether it
-                  speaks or not, so nothing under it moves. It is a live
-                  region — the seconds inside it are not, or a screen
+              {/* The line only ever speaks of a secret that did not open
+                  the app, in Alerte. It holds its height whether it
+                  speaks or not, so nothing under it moves, and what it
+                  says fades in where it stands, without a shake. It is
+                  a live region, and stays one: only its words are
+                  swapped. The seconds inside are not live, or a screen
                   reader would read the whole sentence again every one. */}
               <p
                 role="status"
-                className="mt-2 min-h-5 w-full text-center font-ui text-sm text-muted"
+                className="mt-2 min-h-5 w-full text-center font-ui text-sm text-alert"
               >
                 {wait > 0 ? (
-                  <>
+                  <span key="wait" className="animate-swap">
                     Too many attempts. Try again in{" "}
                     <span aria-live="off">{wait}</span> s
-                  </>
+                  </span>
                 ) : (
-                  message
+                  message && (
+                    <span key={message} className="animate-swap">
+                      {message}
+                    </span>
+                  )
                 )}
               </p>
 
