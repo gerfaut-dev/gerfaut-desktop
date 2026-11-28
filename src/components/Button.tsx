@@ -59,17 +59,25 @@ export function Button({
   const busy = busyProp === true;
   // The spinner finishes the turn it started, even while it fades out.
   const spin = useSpin(busy);
-  // A button that can be busy carries both states at once, stacked in
-  // one grid row: the glyph column holds the icon and the spinner, the
-  // label column the label and the busy words. What is not shown sits
-  // at opacity 0 and keeps its room, so the old state fades into the
-  // new one on the spot. A label without busy words of its own stays
-  // put; with no icon it spans the glyph column, centred, so a button
-  // at rest does not keep a blank where the spinner will come.
+  // A button that can be busy carries both of its states at once. With
+  // busy words of their own, each state is a cell (glyph and words) and
+  // the two cells are stacked in one grid cell: the button is as wide
+  // as the wider, each sits centred in it, and the one not shown waits
+  // at opacity 0 for the other to fade into it. Without them, the label
+  // stays put and only its glyph fades into the spinner, in one slot
+  // (held even with no icon, so the label does not move over for it).
   const canBusy = busyProp !== undefined || busyLabel !== undefined;
-  const busyWords = busyLabel ?? (Icon || !canBusy ? undefined : children);
-  const swaps = busyWords !== undefined;
-  const glyphColumn = Icon !== undefined || canBusy;
+  const swaps = busyLabel !== undefined;
+  const glyphSwaps = canBusy && !swaps;
+  const spinner = (className?: string) => (
+    <LoaderCircle
+      size={ICON_SIZE}
+      strokeWidth={1.5}
+      aria-hidden
+      className={cn(className, spin.spinning && "motion-safe:animate-spin")}
+      onAnimationIteration={spin.onAnimationIteration}
+    />
+  );
   return (
     <UiButton
       // First, so nothing passed here can undo the busy state below.
@@ -90,44 +98,27 @@ export function Button({
         className,
       )}
     >
-      <span className={cn("grid items-center", glyphColumn && "grid-cols-[auto_auto] gap-x-2")}>
-        {Icon && (
-          <Icon
-            size={ICON_SIZE}
-            strokeWidth={1.5}
-            aria-hidden
-            className={cn("col-start-1 row-start-1", fade(!busy))}
-          />
-        )}
-        {canBusy && (
-          <LoaderCircle
-            size={ICON_SIZE}
-            strokeWidth={1.5}
-            aria-hidden
-            className={cn(
-              "col-start-1 row-start-1",
-              fade(busy),
-              spin.spinning && "motion-safe:animate-spin",
-            )}
-            onAnimationIteration={spin.onAnimationIteration}
-          />
-        )}
-        <span
-          aria-hidden={(swaps && busy) || undefined}
-          className={cn(
-            "row-start-1",
-            Icon ? "col-start-2" : glyphColumn && "col-span-2 col-start-1 justify-self-center",
-            swaps && fade(!busy),
+      <span className="grid">
+        <span aria-hidden={(swaps && busy) || undefined} className={cn(CELL, swaps && fade(!busy))}>
+          {(Icon || glyphSwaps) && (
+            <span className="grid">
+              {Icon && (
+                <Icon
+                  size={ICON_SIZE}
+                  strokeWidth={1.5}
+                  aria-hidden
+                  className={cn(SLOT, glyphSwaps && fade(!busy))}
+                />
+              )}
+              {glyphSwaps && spinner(cn(SLOT, fade(busy)))}
+            </span>
           )}
-        >
           {children}
         </span>
         {swaps && (
-          <span
-            aria-hidden={!busy || undefined}
-            className={cn("col-start-2 row-start-1", fade(busy))}
-          >
-            {busyWords}
+          <span aria-hidden={!busy || undefined} className={cn(CELL, fade(busy))}>
+            {spinner()}
+            {busyLabel}
           </span>
         )}
       </span>
@@ -137,6 +128,12 @@ export function Button({
 
 /** The glyph of a labelled button, and of its spinner. */
 const ICON_SIZE = 16;
+
+/** One state of a button, its glyph then its words, the way the button
+    itself lays out what it holds; the two states share one grid cell. */
+const CELL = "col-start-1 row-start-1 inline-flex items-center justify-center gap-2";
+/** The glyph's slot, which the icon and the spinner share. */
+const SLOT = "col-start-1 row-start-1";
 
 /** One state of a busy button fading into the other, on the spot: the
     state pace, and an opacity only, so reduced motion keeps it. */

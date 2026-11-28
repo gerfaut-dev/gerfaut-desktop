@@ -624,7 +624,7 @@ export function BackendSection({
             onClick={() => void save()}
             disabled={!valid}
             busy={saving !== null || testing}
-            busyLabel={saving?.checking ? "Checking the certificate…" : undefined}
+            busyLabel={saving?.checking ? "Checking the certificate…" : "Save backend"}
           >
             Save backend
           </Button>

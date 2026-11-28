@@ -312,6 +312,7 @@ export function WalletsSection({
                           icon={ScanSearch}
                           disabled={rescanning !== null && rescanning !== wallet.id}
                           busy={rescanning === wallet.id}
+                          busyLabel="Rescanning…"
                           onClick={() => {
                             setRescanning(wallet.id);
                             void rescan
@@ -320,7 +321,7 @@ export function WalletsSection({
                               .finally(() => setRescanning(null));
                           }}
                         >
-                          {rescanning === wallet.id ? "Rescanning…" : "Rescan"}
+                          Rescan
                         </Button>
                         <Button
                           variant="secondary"
@@ -374,6 +375,7 @@ export function WalletsSection({
                           variant="danger"
                           size="sm"
                           busy={removeWallet.isPending}
+                          busyLabel="Removing…"
                           onClick={() => {
                             setRemoveFailure(null);
                             removeWallet.mutate(wallet.id, {

@@ -64,9 +64,9 @@ describe("Button", () => {
     // silent.
     expect(button).toContainElement(busyWords);
     expect(busyWords.parentElement).toBe(label.parentElement);
-    expect(busyWords).toHaveClass("row-start-1", "col-start-2", "opacity-0", "transition-opacity");
+    expect(busyWords).toHaveClass("row-start-1", "col-start-1", "opacity-0", "transition-opacity");
     expect(busyWords).toHaveAttribute("aria-hidden", "true");
-    expect(label).toHaveClass("row-start-1", "transition-opacity");
+    expect(label).toHaveClass("row-start-1", "col-start-1", "transition-opacity");
     expect(label).not.toHaveClass("opacity-0");
 
     rerender(
@@ -83,6 +83,17 @@ describe("Button", () => {
     // A fade, not a motion: reduced motion keeps it, so nothing here is
     // written `motion-safe:`.
     expect(busyWords.className).not.toMatch(/motion-safe/);
+  });
+
+  it("lays out a glyph passed among its words the way it lays out its own", () => {
+    render(
+      <Button variant="secondary">
+        <Bell aria-hidden />
+        <span>Copy address</span>
+      </Button>,
+    );
+    const words = screen.getByText("Copy address");
+    expect(words.parentElement).toHaveClass("inline-flex", "items-center", "gap-2");
   });
 
   it("keeps a label with no busy words of its own still while the glyph swaps", () => {

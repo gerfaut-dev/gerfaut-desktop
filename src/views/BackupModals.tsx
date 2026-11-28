@@ -710,6 +710,7 @@ export function BackupRestoreModal({
               variant="primary"
               disabled={chosen.size === 0}
               busy={importBackup.isPending}
+              busyLabel="Restoring…"
               onClick={() => void restore()}
             >
               {chosen.size === 1 ? "Restore 1 wallet" : `Restore ${chosen.size} wallets`}
