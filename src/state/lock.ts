@@ -20,11 +20,11 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 import type { AppLock, LockVerdict, Settings } from "../lib/ipc";
-import { ipc, isCommandError } from "../lib/ipc";
+import { ipc, isKind } from "../lib/ipc";
 
 /** Whether a command came back refused because the app is locked. */
 export function isLockedError(error: unknown): boolean {
-  return isCommandError(error) && error.kind === "locked";
+  return isKind(error, "locked");
 }
 
 /** The settings cut down to what the lock screen is drawn from: the

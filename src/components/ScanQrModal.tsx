@@ -2,7 +2,7 @@ import jsQR from "jsqr";
 import { useEffect, useRef, useState } from "react";
 import type { InputWarning, QrProgress } from "../lib/ipc";
 import { beginExcursion } from "../lib/excursion";
-import { ipc, isCommandError, materialRefusal } from "../lib/ipc";
+import { ipc, isKind, materialRefusal } from "../lib/ipc";
 import { Modal } from "./Modal";
 
 type ScanState =
@@ -201,7 +201,7 @@ export function ScanQrModal({
             // to a scan the user walked away from, and must not surface in
             // the next one.
             if (done) return;
-            if (isCommandError(err) && err.kind === "too_many_parts") {
+            if (isKind(err, "too_many_parts")) {
               stop(TOO_MANY_PARTS);
               return;
             }

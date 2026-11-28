@@ -16,7 +16,7 @@ import { Button, Disclosure, IconButton } from "../../components/Button";
 import { CoverageBadge } from "../../components/CoverageBadge";
 import { DropLine, useDragReorder } from "../../components/DragReorder";
 import { Notice } from "../../components/Notice";
-import { errorMessage, isCommandError } from "../../lib/ipc";
+import { errorMessage, plainMessage } from "../../lib/ipc";
 import type { WalletMeta } from "../../lib/ipc";
 import { moveItem } from "../../lib/reorder";
 import { failureOf as syncFailureOf } from "../../lib/syncState";
@@ -485,7 +485,7 @@ function LivePins({ wallets }: { wallets: WalletMeta[] }) {
                   </div>
                   {failure?.id === wallet.id && (
                     <p role="alert" className="mt-1 font-ui text-xs text-muted">
-                      {isCommandError(failure.error) ? failure.error.message : String(failure.error)}
+                      {plainMessage(failure.error)}
                     </p>
                   )}
                 </li>

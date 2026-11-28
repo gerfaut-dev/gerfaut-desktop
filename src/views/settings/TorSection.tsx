@@ -5,7 +5,7 @@ import { Button } from "../../components/Button";
 import { Notice } from "../../components/Notice";
 import { OnionIcon } from "../../components/icons/OnionIcon";
 import type { TorMode, TorRoute, TorSettings, TorStatus } from "../../lib/ipc";
-import { ipc, isCommandError } from "../../lib/ipc";
+import { ipc, plainMessage } from "../../lib/ipc";
 import { keys } from "../../state/queries";
 import { FieldLabel, SectionCard, Segmented } from "./primitives";
 
@@ -76,7 +76,7 @@ export function TorSection({ tor }: { tor: TorSettings }) {
     mutationFn: (next: TorSettings) => ipc.setTorSettings(next),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: keys.settings });
-      void client.invalidateQueries({ queryKey: ["tor-status"] });
+      void client.invalidateQueries({ queryKey: keys.torStatus });
     },
   });
 
@@ -85,11 +85,11 @@ export function TorSection({ tor }: { tor: TorSettings }) {
     onSuccess: (found) => {
       setRoute(found);
       setProblem(null);
-      void client.invalidateQueries({ queryKey: ["tor-status"] });
+      void client.invalidateQueries({ queryKey: keys.torStatus });
     },
     onError: (error) => {
       setRoute(null);
-      setProblem(isCommandError(error) ? error.message : String(error));
+      setProblem(plainMessage(error));
     },
   });
 
@@ -97,7 +97,7 @@ export function TorSection({ tor }: { tor: TorSettings }) {
   // connection is being tried, the status is polled every second so a
   // first start of the built-in client reads as progress, not as a hang.
   const status = useQuery({
-    queryKey: ["tor-status"],
+    queryKey: keys.torStatus,
     queryFn: ipc.torStatus,
     refetchInterval: connect.isPending ? 1000 : false,
   });
@@ -121,7 +121,7 @@ export function TorSection({ tor }: { tor: TorSettings }) {
       {
         onError: (error) => {
           setMode(tor.mode);
-          setProblem(isCommandError(error) ? error.message : String(error));
+          setProblem(plainMessage(error));
         },
       },
     );

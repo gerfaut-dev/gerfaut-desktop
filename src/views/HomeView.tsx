@@ -31,7 +31,7 @@ import {
   truncateMiddle,
   UNKNOWN,
 } from "../lib/format";
-import { isCommandError } from "../lib/ipc";
+import { plainMessage } from "../lib/ipc";
 import type { PriceRange, SyncStamp, TxSummary, WalletMeta, WalletSnapshot } from "../lib/ipc";
 import { policyDigest } from "../lib/policy";
 import { balanceSeries } from "../lib/series";
@@ -227,7 +227,7 @@ function WalletTitle({ meta }: { meta: WalletMeta }) {
           close();
         },
         onError: (failure) => {
-          setError(isCommandError(failure) ? failure.message : String(failure));
+          setError(plainMessage(failure));
           close();
         },
       },

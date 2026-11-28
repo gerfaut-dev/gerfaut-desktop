@@ -1171,7 +1171,22 @@ export const PRIVATE_KEY_NOT_A_SERVER =
     are written for the person, except for a private key, said in the
     app's: `privateKey`, the words of the screen that asked. */
 export function materialRefusal(error: unknown, privateKey: string = PRIVATE_MATERIAL): string {
-  if (isCommandError(error) && error.kind === "private_material") return privateKey;
+  if (isKind(error, "private_material")) return privateKey;
+  return plainMessage(error);
+}
+
+/** Whether a call failed as a command of the given kind. */
+export function isKind<K extends CommandError["kind"]>(
+  error: unknown,
+  kind: K,
+): error is CommandError & { kind: K } {
+  return isCommandError(error) && error.kind === kind;
+}
+
+/** The command's own message, or the error as text when it did not
+    come from a command. No kind is said in the app's words: that is
+    {@link errorMessage}. */
+export function plainMessage(error: unknown): string {
   return isCommandError(error) ? error.message : String(error);
 }
 
@@ -1180,12 +1195,12 @@ export function materialRefusal(error: unknown, privateKey: string = PRIVATE_MAT
     the app's words. */
 export function errorMessage(error: unknown): string {
   if (isFalseProof(error)) return FALSE_PROOF;
-  return isCommandError(error) ? error.message : String(error);
+  return plainMessage(error);
 }
 
 /** Whether a call failed on a server's false proof, by the core's code. */
 export function isFalseProof(error: unknown): boolean {
-  return isCommandError(error) && error.kind === "false_proof";
+  return isKind(error, "false_proof");
 }
 
 /** What a failure the core hands over as data says: a wallet a sync of

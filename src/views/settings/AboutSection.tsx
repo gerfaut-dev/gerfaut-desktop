@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "../../components/Button";
 import { OpenFailure, useOpenExternal } from "../../components/ExternalLink";
 import { Pill } from "../../components/StatusPill";
-import { isCommandError } from "../../lib/ipc";
+import { isKind } from "../../lib/ipc";
 import { useCheckUpdate } from "../../state/queries";
 import { useUi } from "../../state/store";
 import { RELEASES_URL, useUpdate } from "../../state/update";
@@ -113,7 +113,7 @@ export function AboutSection() {
                     setResult("current");
                   },
                   onError: (error) => {
-                    const tor = isCommandError(error) && error.kind === "tor";
+                    const tor = isKind(error, "tor");
                     setResult(tor ? null : "failed");
                     // Whether Tor stood in the way is the core's to say.
                     void useUpdate.getState().load();

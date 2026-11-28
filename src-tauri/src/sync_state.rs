@@ -6,8 +6,6 @@
 //! window as it comes; the window reads the whole list once
 //! (`wallet_sync_states`) when it starts listening.
 
-use std::sync::atomic::Ordering;
-
 use gerfaut_core::WalletManager;
 use gerfaut_core::manager::WalletSync;
 use tauri::{Emitter, Manager};
@@ -40,7 +38,7 @@ pub(crate) fn forward(app: tauri::AppHandle, manager: &WalletManager) {
 fn tell(app: &tauri::AppHandle, changes: &[WalletSync]) {
     let locked = app
         .try_state::<AppState>()
-        .is_none_or(|state| state.locked.load(Ordering::SeqCst));
+        .is_none_or(|state| state.is_locked());
     if locked {
         return;
     }

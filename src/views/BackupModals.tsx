@@ -14,7 +14,7 @@ import type {
   Network,
   WalletMeta,
 } from "../lib/ipc";
-import { PRIVATE_KEY_NOT_A_BACKUP, ipc, isCommandError } from "../lib/ipc";
+import { PRIVATE_KEY_NOT_A_BACKUP, ipc, isCommandError, isKind, plainMessage } from "../lib/ipc";
 import { NETWORK_LABEL, formatTimestamp } from "../lib/format";
 import {
   backupFilename,
@@ -234,7 +234,7 @@ export function BackupExportModal({
       setBundle(made);
     } catch (error) {
       if (!openRef.current) return;
-      setProblem(isCommandError(error) ? error.message : String(error));
+      setProblem(plainMessage(error));
     }
   };
 
@@ -246,7 +246,7 @@ export function BackupExportModal({
       if (!written) return;
       showToast("Backup saved");
     } catch (error) {
-      showToast(isCommandError(error) ? error.message : String(error));
+      showToast(plainMessage(error));
     }
   };
 
@@ -459,7 +459,7 @@ export function BackupRestoreModal({
     } catch (error) {
       // A file too large, gone, or unreadable: say so rather than
       // leaving a button that does nothing.
-      const tooLarge = isCommandError(error) && error.kind === "invalid_input";
+      const tooLarge = isKind(error, "invalid_input");
       setProblem(tooLarge ? TOO_LARGE : message(error));
     }
   };
@@ -488,13 +488,13 @@ export function BackupRestoreModal({
       wallet in its own words, and a network that does not match or a
       private key comes under `invalid_input` with that name. */
   const restoreMessage = (error: unknown) => {
-    if (isCommandError(error) && error.kind === "private_material") {
+    if (isKind(error, "private_material")) {
       return "A wallet in this backup holds a private key, and Gerfaut only watches: nothing was restored.";
     }
-    if (isCommandError(error) && error.kind === "descriptor") {
+    if (isKind(error, "descriptor")) {
       return `A wallet in this backup is not a descriptor Gerfaut can watch, so nothing was restored. The core says: ${error.message}`;
     }
-    if (isCommandError(error) && error.kind === "invalid_input") {
+    if (isKind(error, "invalid_input")) {
       return `Nothing was restored. The core says: ${error.message}`;
     }
     return message(error);
