@@ -76,7 +76,7 @@ export function TorSection({ tor }: { tor: TorSettings }) {
     mutationFn: (next: TorSettings) => ipc.setTorSettings(next),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: keys.settings });
-      void client.invalidateQueries({ queryKey: ["tor-status"] });
+      void client.invalidateQueries({ queryKey: keys.torStatus });
     },
   });
 
@@ -85,7 +85,7 @@ export function TorSection({ tor }: { tor: TorSettings }) {
     onSuccess: (found) => {
       setRoute(found);
       setProblem(null);
-      void client.invalidateQueries({ queryKey: ["tor-status"] });
+      void client.invalidateQueries({ queryKey: keys.torStatus });
     },
     onError: (error) => {
       setRoute(null);
@@ -97,7 +97,7 @@ export function TorSection({ tor }: { tor: TorSettings }) {
   // connection is being tried, the status is polled every second so a
   // first start of the built-in client reads as progress, not as a hang.
   const status = useQuery({
-    queryKey: ["tor-status"],
+    queryKey: keys.torStatus,
     queryFn: ipc.torStatus,
     refetchInterval: connect.isPending ? 1000 : false,
   });

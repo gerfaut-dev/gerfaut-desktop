@@ -1,6 +1,6 @@
 // Server-state hooks. One place defines cache keys and invalidation.
 
-import type { QueryClient } from "@tanstack/react-query";
+import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import {
   useMutation,
   useQuery,
@@ -38,8 +38,16 @@ export const keys = {
   snapshot: (id: string) => ["snapshot", id] as const,
   utxos: (id: string) => ["utxos", id] as const,
   policy: (id: string) => ["policy", id] as const,
+  /** Every transaction of a wallet: the prefix of `txDetail`. */
+  tx: (id: string) => ["tx", id] as const,
   txDetail: (id: string, txid: string) => ["tx", id, txid] as const,
   receive: (id: string) => ["receive", id] as const,
+  addresses: (id: string) => ["addresses", id] as const,
+  /** The last transactions sent on a network, newest first. */
+  recentBroadcasts: (network: Network) => ["recent-broadcasts", network] as const,
+  broadcastStatus: (network: Network, hex: string | null) =>
+    ["broadcast-status", network, hex ?? "none"] as const,
+  torStatus: ["tor-status"] as const,
   liveStatus: ["live-status"] as const,
   /** Constants of the build, which say nothing of the vault: the lock
       keeps them in the cache. */
@@ -143,27 +151,31 @@ export function useReceiveAddresses(id: string | null, lookahead: number) {
   });
 }
 
+/** The cached reads of one wallet, or of every wallet without `id`:
+    what changes when chain state moves, and what goes with the wallet.
+    Timelocks are among them, read against the tip and the coins, and
+    the receive address, which a sync can mark as used. */
+export function walletKeys(id?: string): QueryKey[] {
+  if (id === undefined) {
+    return [["snapshot"], ["utxos"], ["policy"], ["tx"], ["receive"], ["addresses"]];
+  }
+  return [
+    keys.snapshot(id),
+    keys.utxos(id),
+    keys.policy(id),
+    keys.tx(id),
+    keys.receive(id),
+    keys.addresses(id),
+  ];
+}
+
 /** Invalidates everything that changes when chain state moves. */
 export function useInvalidateWallet() {
   const client = useQueryClient();
   return (id?: string) => {
     void client.invalidateQueries({ queryKey: ["wallets"] });
-    if (id) {
-      void client.invalidateQueries({ queryKey: keys.snapshot(id) });
-      void client.invalidateQueries({ queryKey: keys.utxos(id) });
-      // Timelocks are read against the tip and the coins: both moved.
-      void client.invalidateQueries({ queryKey: keys.policy(id) });
-      void client.invalidateQueries({ queryKey: ["tx", id] });
-      // A sync can mark the shown receive address as used.
-      void client.invalidateQueries({ queryKey: keys.receive(id) });
-      void client.invalidateQueries({ queryKey: ["addresses", id] });
-    } else {
-      void client.invalidateQueries({ queryKey: ["snapshot"] });
-      void client.invalidateQueries({ queryKey: ["utxos"] });
-      void client.invalidateQueries({ queryKey: ["policy"] });
-      void client.invalidateQueries({ queryKey: ["tx"] });
-      void client.invalidateQueries({ queryKey: ["receive"] });
-      void client.invalidateQueries({ queryKey: ["addresses"] });
+    for (const key of walletKeys(id || undefined)) {
+      void client.invalidateQueries({ queryKey: key });
     }
   };
 }
@@ -344,14 +356,14 @@ export function useRevealReceiveAddress() {
     onSuccess: (_answer, { id }) =>
       Promise.all([
         client.invalidateQueries({ queryKey: keys.receive(id) }),
-        client.invalidateQueries({ queryKey: ["addresses", id] }),
+        client.invalidateQueries({ queryKey: keys.addresses(id) }),
       ]),
   });
 }
 
 export function useAddressList(id: string | null) {
   return useQuery({
-    queryKey: ["addresses", id ?? "none"],
+    queryKey: keys.addresses(id ?? "none"),
     queryFn: () => ipc.addressList(id!),
     enabled: id !== null,
   });
@@ -509,9 +521,6 @@ export function usePreviewTransaction() {
   });
 }
 
-/** The last transactions sent on a network, newest first. */
-const recentBroadcastsKey = (network: Network) => ["recent-broadcasts", network] as const;
-
 /** Sends a ready transaction through the configured backend. The vault
     keeps what the network took, so the list of past broadcasts is read
     again. */
@@ -521,7 +530,7 @@ export function useBroadcastTransaction() {
     mutationFn: (args: { network: Network; hex: string }) =>
       ipc.broadcastTransaction(args.network, args.hex),
     onSuccess: (_, args) => {
-      void client.invalidateQueries({ queryKey: recentBroadcastsKey(args.network) });
+      void client.invalidateQueries({ queryKey: keys.recentBroadcasts(args.network) });
     },
   });
 }
@@ -531,7 +540,7 @@ export function useBroadcastTransaction() {
     answered offline too, where the default would hold it back. */
 export function useRecentBroadcasts(network: Network) {
   return useQuery({
-    queryKey: recentBroadcastsKey(network),
+    queryKey: keys.recentBroadcasts(network),
     queryFn: () => ipc.recentBroadcasts(network),
     networkMode: "always",
   });
@@ -544,7 +553,7 @@ export function useForgetBroadcast(network: Network) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (txid: string) => ipc.forgetBroadcast(txid),
-    onSettled: () => client.invalidateQueries({ queryKey: recentBroadcastsKey(network) }),
+    onSettled: () => client.invalidateQueries({ queryKey: keys.recentBroadcasts(network) }),
   });
 }
 
@@ -552,7 +561,7 @@ export function useForgetBroadcast(network: Network) {
     stopping once it has confirmed. */
 export function useTransactionStatus(network: Network, hex: string | null) {
   return useQuery({
-    queryKey: ["broadcast-status", network, hex ?? "none"],
+    queryKey: keys.broadcastStatus(network, hex),
     queryFn: () => ipc.transactionStatus(network, hex!),
     enabled: hex !== null,
     refetchInterval: (query) => (query.state.data?.standing === "confirmed" ? false : 30_000),
@@ -578,14 +587,7 @@ export function useAddWallet() {
     transaction and sync state. The transactions sent on the network
     are read again, as the vault drops the ones that touched it. */
 export function forgetWallet(client: QueryClient, id: string): void {
-  for (const key of [
-    keys.snapshot(id),
-    keys.utxos(id),
-    keys.policy(id),
-    keys.receive(id),
-    ["tx", id],
-    ["addresses", id],
-  ]) {
+  for (const key of walletKeys(id)) {
     client.removeQueries({ queryKey: key });
   }
   client.setQueriesData<WalletMeta[]>({ queryKey: ["wallets"] }, (list) =>
